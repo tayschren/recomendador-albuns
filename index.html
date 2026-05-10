@@ -352,19 +352,19 @@ async function spFetch(path, _retry=false){
 // ═══════════════════════════════════════
 const GENRES=[
   {l:'🎲 Aleatório',q:''},
-  {l:'Rock',q:'rock'},{l:'Jazz',q:'jazz'},{l:'Hip-Hop',q:'hip-hop'},
-  {l:'Eletrônico',q:'electronic'},{l:'Pop',q:'pop'},{l:'Soul / R&B',q:'soul r&b'},
-  {l:'Metal',q:'metal'},{l:'Folk / Indie',q:'folk indie'},{l:'Clássico',q:'classical'},
-  {l:'Blues',q:'blues'},{l:'Country',q:'country'},{l:'Reggae',q:'reggae'},
-  {l:'Funk',q:'funk'},{l:'Punk',q:'punk'},{l:'Alternativo',q:'alternative'},
-  {l:'Bossa Nova',q:'bossa nova'},{l:'Samba',q:'samba'},{l:'MPB',q:'mpb'},
-  {l:'Forró',q:'forro'},{l:'Sertanejo',q:'sertanejo'},{l:'Pagode',q:'pagode'},
-  {l:'Gospel',q:'gospel'},{l:'Ambient',q:'ambient'},{l:'Lo-fi',q:'lo-fi hip hop'},
-  {l:'Grunge',q:'grunge'},{l:'New Wave',q:'new wave'},{l:'Disco',q:'disco'},
-  {l:'Trap',q:'trap'},{l:'K-Pop',q:'k-pop'},{l:'Post-Rock',q:'post-rock'},
-  {l:'Progressive',q:'progressive rock'},{l:'Drill',q:'drill'},
+  {l:'Rock',q:'genre:rock'},{l:'Jazz',q:'genre:jazz'},{l:'Hip-Hop',q:'genre:hip-hop'},
+  {l:'Eletrônico',q:'genre:electronic'},{l:'Pop',q:'genre:pop'},{l:'Soul / R&B',q:'genre:soul'},
+  {l:'Metal',q:'genre:metal'},{l:'Folk / Indie',q:'genre:indie'},{l:'Clássico',q:'genre:classical'},
+  {l:'Blues',q:'genre:blues'},{l:'Country',q:'genre:country'},{l:'Reggae',q:'genre:reggae'},
+  {l:'Funk',q:'genre:funk'},{l:'Punk',q:'genre:punk'},{l:'Alternativo',q:'genre:alternative'},
+  {l:'Bossa Nova',q:'genre:bossa-nova'},{l:'Samba',q:'genre:samba'},{l:'MPB',q:'genre:mpb'},
+  {l:'Forró',q:'genre:forro'},{l:'Sertanejo',q:'genre:sertanejo'},{l:'Pagode',q:'genre:pagode'},
+  {l:'Gospel',q:'genre:gospel'},{l:'Ambient',q:'genre:ambient'},{l:'Lo-fi',q:'genre:lo-fi'},
+  {l:'Grunge',q:'genre:grunge'},{l:'New Wave',q:'genre:new-wave'},{l:'Disco',q:'genre:disco'},
+  {l:'Trap',q:'genre:trap'},{l:'K-Pop',q:'genre:k-pop'},{l:'Post-Rock',q:'genre:post-rock'},
+  {l:'Progressive',q:'genre:progressive-rock'},{l:'Drill',q:'genre:drill'},
 ];
-const FALLBACK=['classic album','essential album','cult album','debut album','acclaimed album'];
+const FALLBACK=['genre:rock','genre:pop','genre:jazz','genre:electronic','genre:classical'];
 let selGenre=GENRES[0],genreBtns=[];
  
 function buildGenres(){
