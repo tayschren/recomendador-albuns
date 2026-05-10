@@ -260,8 +260,10 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
 //  PKCE CONFIG
 // ═══════════════════════════════════════
 const CLIENT_ID    = '1f4a9b64bd104af5a61fb610dffa78cd';
-const REDIRECT_URI = window.location.origin + window.location.pathname.replace(/\/$/,'') + (window.location.pathname.endsWith('/')?'/':'/');
- 
+// Para GitHub Pages, constrói a URL corretamente
+let pathname = window.location.pathname;
+if(pathname.endsWith('index.html')) pathname = pathname.replace('index.html','');
+const REDIRECT_URI = window.location.origin + pathname + (pathname.endsWith('/') ? '' : '/'); 
 function rndStr(n){const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';let s='';const a=new Uint8Array(n);crypto.getRandomValues(a);a.forEach(b=>s+=c[b%c.length]);return s}
  
 async function codeChallenge(v){
@@ -272,6 +274,7 @@ async function codeChallenge(v){
 async function startLogin(){
   const v=rndStr(64);const ch=await codeChallenge(v);
   sessionStorage.setItem('pkce_v',v);
+  console.log('REDIRECT_URI:', REDIRECT_URI);
   location.href='https://accounts.spotify.com/authorize?'+new URLSearchParams({
     response_type:'code',client_id:CLIENT_ID,scope:'user-read-private',
     redirect_uri:REDIRECT_URI,code_challenge_method:'S256',code_challenge:ch
@@ -285,7 +288,7 @@ async function exchangeCode(code){
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:REDIRECT_URI,client_id:CLIENT_ID,code_verifier:v})
   });
-  if(!r.ok){const t=await r.text();throw new Error('Token: '+t)}
+  if(!r.ok){const t=await r.text();console.error('Token exchange failed:',r.status,t);throw new Error('Token: '+t)}
   saveTokens(await r.json());
   sessionStorage.removeItem('pkce_v');
   history.replaceState({},'',location.pathname);
