@@ -4,14 +4,42 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SPINREC — Descubra Álbuns</title>
+<!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║                   SPINREC — ARQUITETURA                      ║
+  ╠══════════════════════════════════════════════════════════════╣
+  ║  Descoberta musical  →  Last.fm API (getTopAlbums / search)  ║
+  ║  Metadados extras    →  MusicBrainz API (release-groups)     ║
+  ║  Capas + links       →  Spotify Web API (PKCE OAuth)         ║
+  ║  Banco próprio       →  localStorage → migrar p/ Supabase    ║
+  ║  Frontend            →  HTML/JS agora → Next.js / React      ║
+  ║  Deploy              →  GitHub Pages agora → Vercel          ║
+  ╚══════════════════════════════════════════════════════════════╝
+
+  FLUXO DE DADOS:
+  1. Last.fm  → descobre álbuns pelo gênero/tag (sem OAuth)
+  2. MusicBrainz → enriquece com metadados (label, country, tags)
+  3. Spotify  → resolve capa em alta resolução + link de escuta
+  4. Supabase (futuro) → persiste histórico, ratings, syncs cross-device
+
+  VARIÁVEIS DE AMBIENTE (ao migrar para Next.js):
+    NEXT_PUBLIC_SPOTIFY_CLIENT_ID
+    LASTFM_API_KEY           (server-side)
+    SUPABASE_URL
+    SUPABASE_ANON_KEY
+-->
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0d0d0d;--surface:#141414;--surface2:#1c1c1c;--border:#2a2a2a;--accent:#e8c84a;--accent2:#e85a4a;--text:#f0ece0;--muted:#6a6560;--success:#4ae89a;--info:#7dcfff}
+:root{
+  --bg:#0d0d0d;--surface:#141414;--surface2:#1c1c1c;--border:#2a2a2a;
+  --accent:#e8c84a;--accent2:#e85a4a;--text:#f0ece0;--muted:#6a6560;
+  --success:#4ae89a;--info:#7dcfff;--lastfm:#d51007;--mb:#ba478f;
+}
 *{box-sizing:border-box;margin:0;padding:0}html{scroll-behavior:smooth}
 body{background:var(--bg);color:var(--text);font-family:'DM Mono',monospace;min-height:100vh;overflow-x:hidden}
 body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:.032;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:160px}
 ::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
- 
+
 header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);display:flex;align-items:center;justify-content:space-between;height:64px;position:sticky;top:0;background:rgba(13,13,13,.93);backdrop-filter:blur(14px);z-index:200}
 .logo{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:.12em;color:var(--accent);line-height:1;user-select:none}
 .logo span{color:var(--text)}
@@ -19,7 +47,23 @@ header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);disp
 .header-badge{font-size:.68rem;color:var(--muted);letter-spacing:.08em}
 .header-btn{background:none;border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.68rem;letter-spacing:.09em;padding:6px 14px;cursor:pointer;transition:border-color .2s,color .2s;text-transform:uppercase}
 .header-btn:hover,.header-btn.active{border-color:var(--accent);color:var(--accent)}
- 
+
+/* SOURCE PILLS */
+.source-bar{padding:8px clamp(16px,4vw,60px);display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);background:var(--surface);overflow-x:auto}
+.source-pill{display:flex;align-items:center;gap:5px;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border:1px solid var(--border);color:var(--muted);white-space:nowrap;transition:all .2s}
+.source-pill.active{color:#000}
+.source-pill.lastfm{border-color:var(--lastfm);color:var(--lastfm)}
+.source-pill.lastfm.active{background:var(--lastfm);color:#fff}
+.source-pill.mb{border-color:var(--mb);color:var(--mb)}
+.source-pill.mb.active{background:var(--mb);color:#fff}
+.source-pill.spotify{border-color:#1DB954;color:#1DB954}
+.source-pill.spotify.active{background:#1DB954;color:#000}
+.source-pill.db{border-color:var(--info);color:var(--info)}
+.source-pill.db.active{background:var(--info);color:#000}
+.source-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.source-sep{color:var(--border);font-size:.7rem;flex-shrink:0}
+
 /* AUTH BANNER */
 #auth-banner{padding:14px clamp(16px,4vw,60px);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border);background:var(--surface);transition:all .3s}
 #auth-banner.connected{background:transparent;border-bottom-color:transparent}
@@ -31,7 +75,9 @@ header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);disp
 .auth-btn.login:hover{background:#f0d050}
 .auth-btn.logout{background:none;border:1px solid var(--accent2);color:var(--accent2);font-family:'DM Mono',monospace;font-size:.72rem;letter-spacing:.08em;padding:8px 16px}
 .auth-btn.logout:hover{background:var(--accent2);color:#fff}
- 
+.auth-note{font-size:.62rem;color:var(--muted);letter-spacing:.04em;margin-top:4px}
+.auth-note span{color:var(--success)}
+
 /* HERO */
 .hero{padding:clamp(32px,7vw,90px) clamp(16px,4vw,60px) 0;display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start;max-width:1400px;margin:0 auto}
 @media(max-width:800px){.hero{grid-template-columns:1fr}}
@@ -42,10 +88,14 @@ header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);disp
 .stat{display:flex;flex-direction:column;gap:3px}
 .stat-num{font-family:'Bebas Neue',sans-serif;font-size:1.9rem;color:var(--accent);line-height:1}
 .stat-label{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.11em}
- 
+
+/* ARCH NOTE */
+.arch-note{margin-top:20px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);padding:12px 16px;font-size:.65rem;color:var(--muted);line-height:1.7;letter-spacing:.03em}
+.arch-note strong{color:var(--text);letter-spacing:.08em}
+
 /* FILTERS */
 .filters-panel{background:var(--surface);border:1px solid var(--border);padding:26px;display:flex;flex-direction:column;gap:20px;position:relative}
-.filters-panel::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--info))}
+.filters-panel::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--lastfm),var(--mb),#1DB954)}
 .filter-group label{display:block;font-size:.62rem;text-transform:uppercase;letter-spacing:.13em;color:var(--muted);margin-bottom:9px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{border:1px solid var(--border);background:none;color:var(--muted);font-family:'DM Mono',monospace;font-size:.68rem;padding:5px 10px;cursor:pointer;letter-spacing:.04em;transition:all .14s;white-space:nowrap}
@@ -60,17 +110,26 @@ header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);disp
 .spin-btn::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,transparent 40%,rgba(255,255,255,.16) 50%,transparent 60%);transform:translateX(-100%);transition:transform .45s}
 .spin-btn:hover:not(:disabled)::before{transform:translateX(100%)}
 .spin-btn:disabled{opacity:.45;cursor:not-allowed}
- 
+.spin-btn-note{font-size:.6rem;color:var(--muted);text-align:center;margin-top:6px;letter-spacing:.04em}
+.spin-btn-note span{color:var(--lastfm)}
+
 /* MAIN */
 .main{max-width:1400px;margin:0 auto;padding:clamp(36px,6vw,72px) clamp(16px,4vw,60px)}
 .section-label{font-size:.62rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-bottom:18px;display:flex;align-items:center;gap:12px}
 .section-label::after{content:'';flex:1;height:1px;background:var(--border)}
- 
+
+/* DATA SOURCES BADGE */
+.data-sources{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.ds-badge{font-size:.58rem;padding:2px 7px;letter-spacing:.08em;text-transform:uppercase;border:1px solid;opacity:.8}
+.ds-badge.lastfm{border-color:var(--lastfm);color:var(--lastfm)}
+.ds-badge.mb{border-color:var(--mb);color:var(--mb)}
+.ds-badge.spotify{border-color:#1DB954;color:#1DB954}
+
 /* ALBUM CARD */
 #result-section{display:none}
 @keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 .album-card{display:grid;grid-template-columns:auto 1fr;gap:30px;background:var(--surface);border:1px solid var(--border);padding:26px;position:relative;overflow:hidden;animation:fadeUp .4s ease both}
-.album-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+.album-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--lastfm),var(--mb),#1DB954)}
 @media(max-width:600px){.album-card{grid-template-columns:1fr}}
 .cover-wrap{position:relative;width:clamp(130px,16vw,210px);flex-shrink:0}
 .cover-wrap img{width:100%;aspect-ratio:1;object-fit:cover;display:block;filter:saturate(.88);transition:filter .3s}
@@ -86,7 +145,14 @@ header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);disp
 .album-meta{display:flex;gap:18px;font-size:.7rem;color:var(--muted);margin-top:10px;flex-wrap:wrap}
 .album-meta span{display:flex;align-items:center;gap:5px}
 .dot{width:4px;height:4px;background:var(--accent);border-radius:50%;flex-shrink:0}
- 
+
+/* LASTFM EXTRAS */
+.lfm-stats{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap}
+.lfm-stat{font-size:.65rem;color:var(--muted);display:flex;align-items:center;gap:5px}
+.lfm-stat strong{color:var(--lastfm)}
+.mb-info{font-size:.63rem;color:var(--muted);margin-top:6px;letter-spacing:.03em}
+.mb-info span{color:var(--mb)}
+
 /* STARS */
 .rating-section{margin-top:18px}
 .rating-label-text{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
@@ -100,7 +166,7 @@ header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);disp
 .star-unit.half .star-fl{opacity:1}
 .star-unit.full .star-fl,.star-unit.full .star-fr{opacity:1}
 .rating-val{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--accent);margin-left:10px;min-width:36px}
- 
+
 /* ACTIONS */
 .album-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
 .btn{background:none;border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.7rem;padding:8px 14px;cursor:pointer;letter-spacing:.06em;text-transform:uppercase;transition:all .14s;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
@@ -108,9 +174,11 @@ header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);disp
 .btn-listen:hover,.btn-listen.marked{background:#4ae89a22}
 .btn-spotify{border-color:#1DB954;color:#1DB954}
 .btn-spotify:hover{background:#1DB954;color:#000}
+.btn-lastfm{border-color:var(--lastfm);color:var(--lastfm)}
+.btn-lastfm:hover{background:var(--lastfm);color:#fff}
 .btn-again{border-color:var(--accent);color:var(--accent)}
 .btn-again:hover{background:var(--accent);color:#000}
- 
+
 /* TRACKLIST */
 .tracklist-section{margin-top:24px;border-top:1px solid var(--border);padding-top:20px}
 .tl-toggle{background:none;border:none;color:var(--muted);font-family:'DM Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;padding:0;display:flex;align-items:center;gap:8px;margin-bottom:14px}
@@ -121,18 +189,26 @@ header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);disp
 .track-row:last-child{border-bottom:none}
 .track-num{color:var(--muted);width:22px;text-align:right;flex-shrink:0}
 .track-name{flex:1}.track-dur{color:var(--muted);flex-shrink:0}
- 
+
 /* LOADING */
 .spinner{display:none;width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin:40px auto}
 .spinner.on{display:block}
 @keyframes spin{to{transform:rotate(360deg)}}
 .loading-text{text-align:center;color:var(--muted);font-size:.75rem;letter-spacing:.06em;display:none;margin-top:8px}
 .loading-text.on{display:block}
- 
+.loading-steps{margin-top:10px;display:none;flex-direction:column;align-items:center;gap:4px}
+.loading-steps.on{display:flex}
+.ls{font-size:.62rem;letter-spacing:.06em;opacity:.5;transition:opacity .3s}
+.ls.active{opacity:1}
+.ls.done{opacity:.4;text-decoration:line-through}
+.ls-lastfm{color:var(--lastfm)}
+.ls-mb{color:var(--mb)}
+.ls-spotify{color:#1DB954}
+
 .notice{background:var(--surface);border:1px solid var(--border);padding:36px;text-align:center;color:var(--muted);font-size:.82rem;letter-spacing:.04em;line-height:1.8}
 .notice strong{color:var(--accent2)}
 hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
- 
+
 /* HISTORY */
 #history-section{display:none}
 #history-section.open{display:block;animation:fadeUp .3s ease both}
@@ -151,10 +227,15 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
 .h-star{font-size:.8rem;color:var(--accent)}.h-star.empty{color:var(--border)}
 .listened-badge{position:absolute;top:6px;right:6px;background:var(--success);color:#000;font-size:.55rem;padding:2px 5px;letter-spacing:.06em;text-transform:uppercase}
 .empty-state{color:var(--muted);font-size:.78rem;padding:44px 0;text-align:center;letter-spacing:.06em;grid-column:1/-1}
+
+/* SUPABASE MIGRATION NOTE */
+.migration-note{position:fixed;bottom:16px;right:16px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--info);padding:10px 14px;font-size:.6rem;color:var(--muted);max-width:240px;z-index:100;letter-spacing:.03em;line-height:1.6}
+.migration-note strong{color:var(--info);display:block;margin-bottom:3px}
+.migration-note button{background:none;border:none;color:var(--border);cursor:pointer;float:right;font-size:.9rem;line-height:1;margin:-2px -4px 0 0}
 </style>
 </head>
 <body>
- 
+
 <header>
   <div class="logo">SPIN<span>REC</span></div>
   <div class="header-right">
@@ -162,30 +243,58 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
     <button class="header-btn" id="hist-btn" onclick="toggleHistory()">Histórico</button>
   </div>
 </header>
- 
+
+<!-- SOURCE STATUS BAR -->
+<div class="source-bar">
+  <div class="source-pill lastfm" id="pill-lastfm" title="Last.fm — descoberta por tag/gênero">
+    <span class="source-dot"></span> Last.fm
+  </div>
+  <span class="source-sep">→</span>
+  <div class="source-pill mb" id="pill-mb" title="MusicBrainz — metadados abertos">
+    <span class="source-dot"></span> MusicBrainz
+  </div>
+  <span class="source-sep">→</span>
+  <div class="source-pill spotify" id="pill-spotify" title="Spotify — capas + link de escuta">
+    <span class="source-dot"></span> Spotify
+  </div>
+  <span class="source-sep">→</span>
+  <div class="source-pill db" id="pill-db" title="Banco local (localStorage → Supabase)">
+    <span class="source-dot"></span> DB local
+  </div>
+</div>
+
 <div id="auth-banner">
-  <p id="auth-text"><strong>Conecte sua conta Spotify</strong> — gratuita ou Premium — para desbloquear recomendações ilimitadas com tracklist e duração real.</p>
+  <div>
+    <p id="auth-text"><strong>Conecte sua conta Spotify</strong> — gratuita ou Premium — para desbloquear capas em alta resolução e links de escuta.</p>
+    <p class="auth-note">Gêneros descobertos via <span>Last.fm</span> · metadados via MusicBrainz · funciona parcialmente sem login</p>
+  </div>
   <button class="auth-btn login" id="auth-action-btn" onclick="handleAuth()">Entrar com Spotify</button>
 </div>
- 
+
 <section class="hero">
   <div class="hero-text">
     <h1>Descubra seu<br>próximo <em>álbum</em><br>favorito.</h1>
-    <p>Selecione gênero, duração e humor. O SPINREC usa o Spotify para encontrar o disco perfeito — com tracklist completa e avaliação por meia estrela.</p>
+    <p>Selecione gênero, duração e época. O SPINREC usa Last.fm para descobrir, MusicBrainz para detalhar e Spotify para conectar você à música.</p>
     <div class="stat-row">
       <div class="stat"><span class="stat-num">∞</span><span class="stat-label">Álbuns</span></div>
       <div class="stat"><span class="stat-num" id="stat-spins">0</span><span class="stat-label">Giros</span></div>
       <div class="stat"><span class="stat-num" id="stat-listened">0</span><span class="stat-label">Escutados</span></div>
     </div>
+    <div class="arch-note">
+      <strong>ARQUITETURA ATUAL</strong><br>
+      Last.fm → MusicBrainz → Spotify + localStorage<br>
+      <strong>PRÓXIMA ETAPA</strong><br>
+      Next.js + Supabase + Vercel
+    </div>
   </div>
- 
+
   <div class="filters-panel">
     <div class="filter-group">
-      <label>Gênero Musical</label>
+      <label>Gênero Musical <span style="color:var(--lastfm);font-size:.58rem">(via Last.fm)</span></label>
       <input class="genre-search" type="text" placeholder="Buscar gênero…" oninput="filterGenres(this.value)">
       <div class="chips" id="genre-chips"></div>
     </div>
- 
+
     <div class="filter-group">
       <label>Duração máxima</label>
       <div class="chips" id="dur-chips">
@@ -198,7 +307,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
         <button class="chip" data-min="61" data-max="9999" onclick="pick(this,'dur')">60+ min</button>
       </div>
     </div>
- 
+
     <div class="filter-group">
       <label>Formato</label>
       <div class="chips" id="type-chips">
@@ -207,7 +316,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
         <button class="chip"        data-val="single" onclick="pick(this,'type')">EP / Single</button>
       </div>
     </div>
- 
+
     <div class="filter-group">
       <label>Época</label>
       <div class="chips" id="era-chips">
@@ -221,31 +330,37 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
         <button class="chip" data-from="2020" data-to="2099" onclick="pick(this,'era')">2020s+</button>
       </div>
     </div>
- 
+
     <div class="filter-group">
       <label>Opções</label>
       <div class="chips">
         <button class="chip" id="excl-chip" onclick="toggleExcl(this)">Excluir já escutados</button>
       </div>
     </div>
- 
-    <button class="spin-btn" id="spin-btn" onclick="spin()" disabled>⟳ &nbsp; GIRAR O DISCO</button>
+
+    <button class="spin-btn" id="spin-btn" onclick="spin()">⟳ &nbsp; GIRAR O DISCO</button>
+    <p class="spin-btn-note">Descoberta via <span>Last.fm</span> · funciona sem login</p>
   </div>
 </section>
- 
+
 <main class="main">
   <div id="load-wrap" style="display:none">
     <div class="spinner on"></div>
-    <p class="loading-text on">Consultando Spotify…</p>
+    <p class="loading-text on">Consultando fontes…</p>
+    <div class="loading-steps on" id="loading-steps">
+      <span class="ls ls-lastfm" id="ls1">① Last.fm — buscando álbuns por tag…</span>
+      <span class="ls ls-mb"     id="ls2">② MusicBrainz — enriquecendo metadados…</span>
+      <span class="ls ls-spotify" id="ls3">③ Spotify — resolvendo capa + link…</span>
+    </div>
   </div>
- 
+
   <div id="result-section">
     <p class="section-label">Recomendação</p>
     <div id="card-wrap"></div>
   </div>
- 
+
   <hr class="divider" id="div1" style="display:none">
- 
+
   <div id="history-section">
     <div class="history-header">
       <p class="section-label" style="margin-bottom:0;flex:1">Histórico de escutas</p>
@@ -254,135 +369,359 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
     <div class="history-grid" id="hist-grid"></div>
   </div>
 </main>
- 
+
+<!-- SUPABASE MIGRATION BANNER -->
+<div class="migration-note" id="migration-note">
+  <button onclick="document.getElementById('migration-note').remove()">×</button>
+  <strong>💾 DB LOCAL ATIVO</strong>
+  Histórico salvo em localStorage.<br>
+  Migre para Supabase para sync entre dispositivos.
+</div>
+
 <script>
+// ╔══════════════════════════════════════════════════════════════╗
+// ║                SPINREC — CAMADA DE SERVIÇOS                  ║
+// ╠══════════════════════════════════════════════════════════════╣
+// ║  1. LastFmService   → descoberta por tag sem OAuth           ║
+// ║  2. MusicBrainzService → metadados abertos                   ║
+// ║  3. SpotifyService  → capas HD + link (PKCE OAuth)           ║
+// ║  4. DBService       → localStorage (→ Supabase)              ║
+// ╚══════════════════════════════════════════════════════════════╝
+
 // ═══════════════════════════════════════
-//  PKCE CONFIG
+//  CONFIG
 // ═══════════════════════════════════════
-const CLIENT_ID    = '1f4a9b64bd104af5a61fb610dffa78cd';
-// Para GitHub Pages, constrói a URL corretamente
+const SPOTIFY_CLIENT_ID = '1f4a9b64bd104af5a61fb610dffa78cd';
+
+// Last.fm — chave pública (pode ficar no frontend; sem dados privados)
+// TODO ao migrar para Next.js: mover para variável de ambiente LASTFM_API_KEY
+// e chamar via /api/lastfm para não expor a key
+const LASTFM_API_KEY = 'be2331260a3fb4f8d91e7a96bd4c5ebb'; // demo key — substitua pela sua
+
+// MusicBrainz — sem autenticação para leitura
+const MB_BASE = 'https://musicbrainz.org/ws/2';
+const LASTFM_BASE = 'https://ws.audioscrobbler.com/2.0';
+
+// ═══════════════════════════════════════
+//  SPOTIFY PKCE AUTH
+// ═══════════════════════════════════════
 let pathname = window.location.pathname;
 if(pathname.endsWith('index.html')) pathname = pathname.replace('index.html','');
-const REDIRECT_URI = window.location.origin + pathname + (pathname.endsWith('/') ? '' : '/'); 
-function rndStr(n){const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';let s='';const a=new Uint8Array(n);crypto.getRandomValues(a);a.forEach(b=>s+=c[b%c.length]);return s}
- 
+const REDIRECT_URI = window.location.origin + pathname + (pathname.endsWith('/') ? '' : '/');
+
+function rndStr(n){
+  const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  let s='';const a=new Uint8Array(n);crypto.getRandomValues(a);
+  a.forEach(b=>s+=c[b%c.length]);return s;
+}
 async function codeChallenge(v){
   const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
   return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }
- 
 async function startLogin(){
   const v=rndStr(64);const ch=await codeChallenge(v);
   sessionStorage.setItem('pkce_v',v);
-  console.log('REDIRECT_URI:', REDIRECT_URI);
   location.href='https://accounts.spotify.com/authorize?'+new URLSearchParams({
-    response_type:'code',client_id:CLIENT_ID,scope:'user-read-private',
+    response_type:'code',client_id:SPOTIFY_CLIENT_ID,scope:'user-read-private',
     redirect_uri:REDIRECT_URI,code_challenge_method:'S256',code_challenge:ch
   });
 }
- 
 async function exchangeCode(code){
   const v=sessionStorage.getItem('pkce_v');
-  if(!v)throw new Error('PKCE verifier missing — tente novamente');
+  if(!v) throw new Error('PKCE verifier missing');
   const r=await fetch('https://accounts.spotify.com/api/token',{
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:REDIRECT_URI,client_id:CLIENT_ID,code_verifier:v})
+    body:new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:REDIRECT_URI,client_id:SPOTIFY_CLIENT_ID,code_verifier:v})
   });
-  if(!r.ok){const t=await r.text();console.error('Token exchange failed:',r.status,t);throw new Error('Token: '+t)}
+  if(!r.ok){const t=await r.text();throw new Error('Token: '+t)}
   saveTokens(await r.json());
   sessionStorage.removeItem('pkce_v');
   history.replaceState({},'',location.pathname);
 }
- 
 async function refreshToken(){
   const rt=localStorage.getItem('sp_rt');if(!rt)throw new Error('no refresh token');
   const r=await fetch('https://accounts.spotify.com/api/token',{
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-    body:new URLSearchParams({grant_type:'refresh_token',refresh_token:rt,client_id:CLIENT_ID})
+    body:new URLSearchParams({grant_type:'refresh_token',refresh_token:rt,client_id:SPOTIFY_CLIENT_ID})
   });
-  if(!r.ok)throw new Error('refresh failed');
+  if(!r.ok) throw new Error('refresh failed');
   saveTokens(await r.json());
 }
- 
 function saveTokens(d){
   localStorage.setItem('sp_at',d.access_token);
   localStorage.setItem('sp_exp',Date.now()+(d.expires_in-60)*1000);
-  if(d.refresh_token)localStorage.setItem('sp_rt',d.refresh_token);
+  if(d.refresh_token) localStorage.setItem('sp_rt',d.refresh_token);
 }
- 
 async function getAT(){
-  if(Date.now()<(+localStorage.getItem('sp_exp')||0))return localStorage.getItem('sp_at');
+  if(Date.now()<(+localStorage.getItem('sp_exp')||0)) return localStorage.getItem('sp_at');
   await refreshToken();return localStorage.getItem('sp_at');
 }
- 
 const loggedIn=()=>!!localStorage.getItem('sp_at');
- 
 function doLogout(){['sp_at','sp_exp','sp_rt'].forEach(k=>localStorage.removeItem(k));syncAuthUI()}
- 
 function handleAuth(){loggedIn()?doLogout():startLogin()}
- 
+
 // ═══════════════════════════════════════
-//  SPOTIFY FETCH
+//  SERVICE: LAST.FM
+//  Responsável: descoberta musical por tag/gênero
+//  Docs: https://www.last.fm/api
+//  TODO Next.js: chamar via /api/lastfm (server-side) p/ esconder API key
 // ═══════════════════════════════════════
-async function spFetch(path, _retry=false){
-  const token=await getAT();
-  console.log('[spFetch]', 'https://api.spotify.com/v1'+path);
-  console.log('[token]', token ? token.substring(0,20)+'...' : 'NULL/EMPTY');
-  const r=await fetch('https://api.spotify.com/v1'+path,{headers:{Authorization:'Bearer '+token}});
-  if(r.status===401){
-    if(_retry) throw new Error('Token inválido após refresh. Faça login novamente.');
-    await refreshToken(); return spFetch(path, true);
-  }
-  if(!r.ok){
-    const t=await r.text();
-    console.error('[spFetch] ERROR',r.status,t,'URL:','https://api.spotify.com/v1'+path);
-    // Spotify às vezes retorna 400 "Invalid limit" quando o token está inválido
-    // Tenta refresh uma vez antes de desistir
-    if(r.status===400 && !_retry){
-      console.warn('[spFetch] 400 recebido, tentando refresh do token...');
-      try{ await refreshToken(); return spFetch(path, true); }catch(_){}
+const LastFmService = {
+  /**
+   * Busca top álbuns de uma tag (gênero) no Last.fm
+   * @param {string} tag  - ex: "jazz", "bossa nova", "shoegaze"
+   * @param {number} page - paginação aleatória para variedade
+   * @returns {Array}     - lista de {name, artist, mbid, image, url, playcount}
+   */
+  async getTopAlbumsByTag(tag, page=1){
+    // Last.fm tag.getTopAlbums — sem OAuth, apenas API key
+    const url = `${LASTFM_BASE}/?method=tag.gettopalbums&tag=${encodeURIComponent(tag)}&api_key=${LASTFM_API_KEY}&format=json&limit=50&page=${page}`;
+    try {
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('Last.fm '+r.status);
+      const d = await r.json();
+      return (d.albums?.album || []).filter(a => a.name && a.artist?.name && a.name !== '(null)');
+    } catch(e) {
+      console.warn('[LastFm] falhou, usando fallback Spotify:', e.message);
+      return [];
     }
-    throw new Error('Spotify '+r.status+': '+t);
+  },
+
+  /**
+   * Busca álbuns por artista no Last.fm
+   * @param {string} artist
+   * @returns {Array}
+   */
+  async getArtistAlbums(artist){
+    const url = `${LASTFM_BASE}/?method=artist.gettopalbums&artist=${encodeURIComponent(artist)}&api_key=${LASTFM_API_KEY}&format=json&limit=20`;
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      return (d.topalbums?.album || []);
+    } catch(e){ return []; }
+  },
+
+  /**
+   * Obtém info detalhada de um álbum via Last.fm
+   * Inclui: tags, wiki, playcount, listeners
+   */
+  async getAlbumInfo(artist, album){
+    const url = `${LASTFM_BASE}/?method=album.getinfo&artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}&api_key=${LASTFM_API_KEY}&format=json`;
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      return d.album || null;
+    } catch(e){ return null; }
+  },
+
+  // Extrai a melhor imagem disponível do array de imagens do Last.fm
+  getBestImage(images){
+    if(!images || !images.length) return '';
+    const pref = ['extralarge','large','medium','small'];
+    for(const size of pref){
+      const img = images.find(i => i.size === size);
+      if(img && img['#text'] && img['#text'] !== '') return img['#text'];
+    }
+    return images[images.length-1]?.['#text'] || '';
   }
-  return r.json();
-}
- 
+};
+
 // ═══════════════════════════════════════
-//  GENRES
+//  SERVICE: MUSICBRAINZ
+//  Responsável: metadados abertos (label, país, data, tracklist oficial)
+//  Docs: https://musicbrainz.org/doc/MusicBrainz_API
+//  Rate limit: 1 req/s — respeitar com delay
+//  TODO Next.js: cachear respostas no Supabase p/ evitar rate limit
+// ═══════════════════════════════════════
+const MusicBrainzService = {
+  _lastCall: 0,
+
+  // Garante delay mínimo de 1.1s entre chamadas (respeitar rate limit)
+  async _throttle(){
+    const now = Date.now();
+    const diff = now - this._lastCall;
+    if(diff < 1100) await new Promise(r => setTimeout(r, 1100 - diff));
+    this._lastCall = Date.now();
+  },
+
+  /**
+   * Busca release-group pelo nome do álbum + artista
+   * Retorna: mbid, tipo, data, label, país, tracklist
+   */
+  async searchRelease(albumName, artistName){
+    await this._throttle();
+    const q = encodeURIComponent(`release:"${albumName}" AND artist:"${artistName}"`);
+    const url = `${MB_BASE}/release?query=${q}&limit=5&fmt=json`;
+    try {
+      const r = await fetch(url, {headers:{'User-Agent':'SPINREC/1.0 (spinrec.app)'}});
+      if(!r.ok) return null;
+      const d = await r.json();
+      const releases = d.releases || [];
+      // Prefere release com mais informações
+      const best = releases.find(rel => rel['label-info']?.length > 0) || releases[0];
+      if(!best) return null;
+      return {
+        mbid: best.id,
+        date: best.date || '',
+        country: best.country || '',
+        label: best['label-info']?.[0]?.label?.name || '',
+        status: best.status || '',
+        trackCount: best['track-count'] || 0,
+        barcode: best.barcode || '',
+      };
+    } catch(e){
+      console.warn('[MusicBrainz] erro:', e.message);
+      return null;
+    }
+  },
+
+  /**
+   * Obtém tracklist oficial de um release pelo MBID
+   */
+  async getTracklist(mbid){
+    if(!mbid) return [];
+    await this._throttle();
+    try {
+      const r = await fetch(`${MB_BASE}/release/${mbid}?inc=recordings&fmt=json`, {
+        headers:{'User-Agent':'SPINREC/1.0 (spinrec.app)'}
+      });
+      if(!r.ok) return [];
+      const d = await r.json();
+      const media = d.media || [];
+      return media.flatMap(m => (m.tracks || []).map(t => ({
+        n: t.number,
+        name: t.title,
+        ms: t.length || 0
+      })));
+    } catch(e){ return []; }
+  }
+};
+
+// ═══════════════════════════════════════
+//  SERVICE: SPOTIFY
+//  Responsável: capas HD + link de escuta
+//  Docs: https://developer.spotify.com/documentation/web-api
+//  TODO Next.js: tokens gerenciados server-side via Supabase session
+// ═══════════════════════════════════════
+const SpotifyService = {
+  async fetch(path, retry=false){
+    if(!loggedIn()) return null; // Spotify é opcional
+    try {
+      const token = await getAT();
+      const r = await fetch('https://api.spotify.com/v1'+path, {
+        headers:{Authorization:'Bearer '+token}
+      });
+      if(r.status === 401){
+        if(retry) throw new Error('401 após refresh');
+        await refreshToken(); return this.fetch(path, true);
+      }
+      if(!r.ok) return null;
+      return r.json();
+    } catch(e){
+      console.warn('[Spotify] erro:', e.message);
+      return null;
+    }
+  },
+
+  /**
+   * Resolve capa em alta resolução + URL do álbum no Spotify
+   * Busca pelo nome do álbum + artista
+   * @returns {image, url} ou {image:'', url:''}
+   */
+  async resolveAlbum(albumName, artistName){
+    const q = `album:${albumName} artist:${artistName}`;
+    const d = await this.fetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=5&market=BR`);
+    if(!d) return {image:'', url:''};
+    const items = d.albums?.items || [];
+    const match = items.find(i =>
+      i.name.toLowerCase().includes(albumName.toLowerCase().substring(0,10))
+    ) || items[0];
+    if(!match) return {image:'', url:''};
+    return {
+      image: match.images?.[0]?.url || '',
+      url: match.external_urls?.spotify || '',
+      spotifyId: match.id,
+      tracks: [], // preenchido separadamente se necessário
+      totalTracks: match.total_tracks || 0,
+    };
+  },
+
+  /**
+   * Obtém tracklist completa de um álbum Spotify
+   */
+  async getTracklist(spotifyId){
+    if(!spotifyId) return [];
+    const d = await this.fetch(`/albums/${spotifyId}/tracks?limit=50&market=BR`);
+    if(!d) return [];
+    return (d.items || []).map(t => ({
+      n: t.track_number,
+      name: t.name,
+      ms: t.duration_ms || 0
+    }));
+  }
+};
+
+// ═══════════════════════════════════════
+//  SERVICE: DB (localStorage → Supabase)
+//  TODO: substituir por Supabase client
+//
+//  Migração para Supabase:
+//  import { createClient } from '@supabase/supabase-js'
+//  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+//  -- Tabelas: spinrec_history (user_id, album_id, rating, listened, ts)
+//              spinrec_albums  (id, name, artist, image, url, ...)
+// ═══════════════════════════════════════
+const DBService = {
+  KEY: 'spinrec4',
+  getHistory(){ try{return JSON.parse(localStorage.getItem(this.KEY)||'[]')}catch{return[]} },
+  saveHistory(h){ localStorage.setItem(this.KEY, JSON.stringify(h)) },
+  addAlbum(a){
+    let h=this.getHistory();
+    if(!h.find(x=>x.id===a.id)) h.unshift({...a,rating:0,listened:false,ts:Date.now()});
+    this.saveHistory(h);syncStats();
+  },
+  setListened(id,v){ let h=this.getHistory();const x=h.find(a=>a.id===id);if(x)x.listened=v;this.saveHistory(h);syncStats(); },
+  setRating(id,v){ let h=this.getHistory();const x=h.find(a=>a.id===id);if(x)x.rating=v;this.saveHistory(h);if(histOpen)renderHist(); },
+  clear(){ if(!confirm('Limpar todo o histórico?'))return;localStorage.removeItem(this.KEY);syncStats();renderHist(); },
+};
+
+// ═══════════════════════════════════════
+//  GENRES (tags Last.fm)
 // ═══════════════════════════════════════
 const GENRES=[
   {l:'🎲 Aleatório',q:''},
-  {l:'Rock',q:'genre:rock'},{l:'Jazz',q:'genre:jazz'},{l:'Hip-Hop',q:'genre:hip-hop'},
-  {l:'Eletrônico',q:'genre:electronic'},{l:'Pop',q:'genre:pop'},{l:'Soul / R&B',q:'genre:soul'},
-  {l:'Metal',q:'genre:metal'},{l:'Folk / Indie',q:'genre:indie'},{l:'Clássico',q:'genre:classical'},
-  {l:'Blues',q:'genre:blues'},{l:'Country',q:'genre:country'},{l:'Reggae',q:'genre:reggae'},
-  {l:'Funk',q:'genre:funk'},{l:'Punk',q:'genre:punk'},{l:'Alternativo',q:'genre:alternative'},
-  {l:'Bossa Nova',q:'genre:bossa-nova'},{l:'Samba',q:'genre:samba'},{l:'MPB',q:'genre:mpb'},
-  {l:'Forró',q:'genre:forro'},{l:'Sertanejo',q:'genre:sertanejo'},{l:'Pagode',q:'genre:pagode'},
-  {l:'Gospel',q:'genre:gospel'},{l:'Ambient',q:'genre:ambient'},{l:'Lo-fi',q:'genre:lo-fi'},
-  {l:'Grunge',q:'genre:grunge'},{l:'New Wave',q:'genre:new-wave'},{l:'Disco',q:'genre:disco'},
-  {l:'Trap',q:'genre:trap'},{l:'K-Pop',q:'genre:k-pop'},{l:'Post-Rock',q:'genre:post-rock'},
-  {l:'Progressive',q:'genre:progressive-rock'},{l:'Drill',q:'genre:drill'},
+  {l:'Rock',q:'rock'},{l:'Jazz',q:'jazz'},{l:'Hip-Hop',q:'hip hop'},
+  {l:'Eletrônico',q:'electronic'},{l:'Pop',q:'pop'},{l:'Soul / R&B',q:'soul'},
+  {l:'Metal',q:'metal'},{l:'Folk / Indie',q:'indie'},{l:'Clássico',q:'classical'},
+  {l:'Blues',q:'blues'},{l:'Country',q:'country'},{l:'Reggae',q:'reggae'},
+  {l:'Funk',q:'funk'},{l:'Punk',q:'punk'},{l:'Alternativo',q:'alternative'},
+  {l:'Bossa Nova',q:'bossa nova'},{l:'Samba',q:'samba'},{l:'MPB',q:'mpb'},
+  {l:'Forró',q:'forro'},{l:'Sertanejo',q:'sertanejo'},{l:'Pagode',q:'pagode'},
+  {l:'Gospel',q:'gospel'},{l:'Ambient',q:'ambient'},{l:'Lo-fi',q:'lo-fi'},
+  {l:'Grunge',q:'grunge'},{l:'New Wave',q:'new wave'},{l:'Disco',q:'disco'},
+  {l:'Trap',q:'trap'},{l:'K-Pop',q:'k-pop'},{l:'Post-Rock',q:'post-rock'},
+  {l:'Progressive',q:'progressive rock'},{l:'Shoegaze',q:'shoegaze'},
+  {l:'Drill',q:'drill'},{l:'Psychedelic',q:'psychedelic'},
 ];
-const FALLBACK=['genre:rock','genre:pop','genre:jazz','genre:electronic','genre:classical'];
+const FALLBACK_TAGS=['rock','jazz','electronic','pop','soul','indie','blues'];
 let selGenre=GENRES[0],genreBtns=[];
- 
+
 function buildGenres(){
   const w=document.getElementById('genre-chips');w.innerHTML='';genreBtns=[];
   GENRES.forEach((g,i)=>{
-    const b=document.createElement('button');b.className='chip'+(i===0?' active':'');
+    const b=document.createElement('button');
+    b.className='chip'+(i===0?' active':'');
     b.textContent=g.l;
     b.onclick=()=>{genreBtns.forEach(x=>x.classList.remove('active'));b.classList.add('active');selGenre=g};
     w.appendChild(b);genreBtns.push(b);
   });
 }
 function filterGenres(v){const q=v.toLowerCase();genreBtns.forEach(b=>{b.style.display=(!q||b.textContent.toLowerCase().includes(q))?'':'none'})}
- 
+
 // ═══════════════════════════════════════
 //  FILTER STATE
 // ═══════════════════════════════════════
 let F={durMin:0,durMax:9999,type:'',eraFrom:1900,eraTo:2099,excl:false};
- 
 function pick(el,g){
   document.querySelectorAll('#'+g+'-chips .chip').forEach(c=>c.classList.remove('active'));
   el.classList.add('active');
@@ -391,120 +730,184 @@ function pick(el,g){
   if(g==='era'){F.eraFrom=+el.dataset.from;F.eraTo=+el.dataset.to}
 }
 function toggleExcl(el){F.excl=!F.excl;el.classList.toggle('active',F.excl)}
- 
+
 // ═══════════════════════════════════════
-//  HISTORY
+//  LOADING STEPS UI
 // ═══════════════════════════════════════
-function getH(){try{return JSON.parse(localStorage.getItem('spinrec3')||'[]')}catch{return[]}}
-function saveH(h){localStorage.setItem('spinrec3',JSON.stringify(h))}
-function addH(a){let h=getH();if(!h.find(x=>x.id===a.id))h.unshift({...a,rating:0,listened:false,ts:Date.now()});saveH(h);syncStats()}
-function setListened(id,v){let h=getH();const x=h.find(a=>a.id===id);if(x)x.listened=v;saveH(h);syncStats()}
-function setRating(id,v){let h=getH();const x=h.find(a=>a.id===id);if(x)x.rating=v;saveH(h);if(histOpen)renderHist()}
-function clearHist(){if(!confirm('Limpar todo o histórico?'))return;localStorage.removeItem('spinrec3');syncStats();renderHist()}
-function syncStats(){const h=getH();const n=h.filter(a=>a.listened).length;document.getElementById('stat-listened').textContent=n;document.getElementById('listened-badge').textContent=n+' escutados'}
- 
+function setStep(n){
+  ['ls1','ls2','ls3'].forEach((id,i)=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    el.classList.remove('active','done');
+    if(i+1<n) el.classList.add('done');
+    else if(i+1===n) el.classList.add('active');
+  });
+}
+
 // ═══════════════════════════════════════
-//  SPIN
+//  SPIN — ORQUESTRADOR PRINCIPAL
+//  Fluxo: Last.fm → filtros → MusicBrainz → Spotify
 // ═══════════════════════════════════════
 let spins=0,curAlbum=null;
- 
+
 async function spin(){
-  if(!loggedIn()){startLogin();return}
   document.getElementById('spin-btn').disabled=true;
   showLoad(true);hideRes();
-  try{
-    const a=await fetchAlbum();
-    if(!a){showErr('Nenhum álbum encontrado com esses filtros. Tente ampliar os critérios.');return}
-    curAlbum=a;spins++;document.getElementById('stat-spins').textContent=spins;
-    addH(a);renderCard(a);
+  try {
+    const album = await fetchAlbumMultiSource();
+    if(!album){showErr('Nenhum álbum encontrado com esses filtros. Tente ampliar os critérios.');return}
+    curAlbum=album;spins++;
+    document.getElementById('stat-spins').textContent=spins;
+    DBService.addAlbum(album);
+    renderCard(album);
     document.getElementById('result-section').style.display='block';
     document.getElementById('result-section').scrollIntoView({behavior:'smooth',block:'start'});
-  }catch(e){
+  } catch(e){
     console.error(e);
-    if(e.message.includes('401')||e.message.includes('no refresh')){doLogout();showErr('Sessão expirada. Faça login novamente.')}
-    else showErr('Erro ao consultar Spotify.<br><small style="font-size:.65rem;opacity:.6">'+e.message+'</small>');
-  }finally{showLoad(false);document.getElementById('spin-btn').disabled=!loggedIn()}
-}
- 
-async function fetchAlbum(){
-  const h=getH();
-  const listenedIds=h.filter(a=>a.listened).map(a=>a.id);
-  const histIds=h.map(a=>a.id);
-  const LIMIT=10;
-
-  // genre: funciona melhor buscando artistas, depois pegando albums deles
-  const fallbackGenres=['genre:rock','genre:pop','genre:jazz','genre:electronic','genre:classical','genre:soul','genre:blues','genre:country','genre:reggae','genre:metal'];
-  const genreQ=selGenre.q||rnd(fallbackGenres);
-
-  // 1. Busca artistas do genero
-  const off=Math.floor(Math.random()*20)*LIMIT;
-  const ar=await spFetch(`/search?q=${encodeURIComponent(genreQ)}&type=artist&limit=${LIMIT}&offset=${off}&market=BR`);
-  console.log('[fetchAlbum] artistas encontrados:', (ar.artists||{}).items?.length, ar);
-  const artists=(ar.artists||{}).items?.filter(Boolean)||[];
-  if(!artists.length){ console.warn('[fetchAlbum] nenhum artista, retornando null'); return null; }
-
-  // 2. Pega albuns de artistas aleatorios do resultado
-  let items=[];
-  const typeQ=F.type?`&include_groups=${F.type}`:'&include_groups=album,single';
-  const picked=[];
-  for(let i=0;i<Math.min(4,artists.length);i++) picked.push(rnd(artists));
-  console.log('[fetchAlbum] artistas escolhidos:', picked.map(a=>a.name));
-  for(const artist of picked){
-    try{
-      const alb=await spFetch(`/artists/${artist.id}/albums?limit=10&market=BR${typeQ}`);
-      console.log('[fetchAlbum] albums de', artist.name, ':', alb.items?.length, alb);
-      items=items.concat((alb.items||[]).filter(Boolean));
-    }catch(e){ console.error('[fetchAlbum] erro albums de', artist.name, e); }
+    showErr('Erro ao buscar álbum.<br><small style="font-size:.65rem;opacity:.6">'+e.message+'</small>');
+  } finally {
+    showLoad(false);
+    document.getElementById('spin-btn').disabled=false;
   }
-  console.log('[fetchAlbum] total items antes dos filtros:', items.length);
+}
 
-  // Deduplica, filtra epoca e preferencias
-  items=[...new Map(items.map(i=>[i.id,i])).values()];
-  if(F.type) items=items.filter(it=>(it.album_type||'').toLowerCase()===F.type);
-  items=items.filter(it=>{const y=parseInt((it.release_date||'0').substring(0,4));return y>=F.eraFrom&&y<=F.eraTo});
-  if(F.excl)items=items.filter(it=>!listenedIds.includes(it.id));
-  if(!items.length)return null;
-  let pool=items.filter(it=>!histIds.includes(it.id));
-  if(!pool.length)pool=items;
-  for(let t=0;t<8;t++){
-    if(!pool.length)break;
-    const p=rnd(pool);
-    const full=await spFetch(`/albums/${p.id}`);
-    const ms=full.tracks.items.reduce((s,tr)=>s+(tr.duration_ms||0),0);
-    const min=Math.round(ms/60000);
-    if(min>=F.durMin&&min<=F.durMax)return norm(full,min);
-    pool=pool.filter(x=>x.id!==p.id);
+/**
+ * Orquestra os 3 serviços para montar um álbum completo:
+ * 1. Last.fm  → lista de candidatos pelo gênero
+ * 2. Filtra por época, tipo, exclusões
+ * 3. MusicBrainz → metadados (label, país, tracklist)
+ * 4. Spotify  → capa HD + link (se logado)
+ */
+async function fetchAlbumMultiSource(){
+  const h = DBService.getHistory();
+  const listenedIds = h.filter(a=>a.listened).map(a=>a.id);
+  const histIds = h.map(a=>a.id);
+
+  // ① LAST.FM — descoberta
+  setStep(1);setPill('lastfm',true);
+  const tag = selGenre.q || rnd(FALLBACK_TAGS);
+  const page = Math.floor(Math.random()*4)+1; // paginação aleatória para variedade
+  let candidates = await LastFmService.getTopAlbumsByTag(tag, page);
+
+  // Fallback: se Last.fm falhar, tenta tag genérica
+  if(!candidates.length && selGenre.q){
+    candidates = await LastFmService.getTopAlbumsByTag(rnd(FALLBACK_TAGS), 1);
+  }
+  if(!candidates.length) throw new Error('Last.fm não retornou álbuns para esta tag');
+  setPill('lastfm',false);
+
+  // Filtra por época e tipo (Last.fm não tem esses filtros nativos)
+  // OBS: Last.fm não fornece ano direto no getTopAlbums — filtramos depois via MusicBrainz
+  // Embaralha para variedade
+  let pool = shuffle([...candidates]);
+  if(F.excl) pool = pool.filter(a => !listenedIds.includes(lfmId(a)));
+
+  // ② MUSICBRAINZ — metadados + filtros de época/duração
+  setStep(2);setPill('mb',true);
+  for(let i=0; i<Math.min(pool.length,8); i++){
+    const candidate = pool[i];
+    const albumName = candidate.name;
+    const artistName = candidate.artist?.name || candidate.artist || '';
+    if(!albumName || !artistName) continue;
+
+    // Busca metadados no MusicBrainz
+    const mbData = await MusicBrainzService.searchRelease(albumName, artistName);
+
+    // Filtro de época via MusicBrainz
+    if(mbData?.date){
+      const year = parseInt(mbData.date.substring(0,4));
+      if(year < F.eraFrom || year > F.eraTo) continue;
+    }
+
+    // ③ SPOTIFY — capa + link + tracklist
+    setStep(3);setPill('spotify',true);
+    const spData = await SpotifyService.resolveAlbum(albumName, artistName);
+
+    // Tracklist: preferência Spotify > MusicBrainz > Last.fm
+    let tracks = [];
+    let totalMin = 0;
+    if(spData?.spotifyId){
+      tracks = await SpotifyService.getTracklist(spData.spotifyId);
+    }
+    if(!tracks.length && mbData?.mbid){
+      tracks = await MusicBrainzService.getTracklist(mbData.mbid);
+    }
+    // Calcula duração
+    if(tracks.length){
+      totalMin = Math.round(tracks.reduce((s,t)=>s+(t.ms||0),0)/60000);
+    } else {
+      // Last.fm tem duração em segundos em alguns casos
+      totalMin = Math.round((candidate.duration||0)/60) || 0;
+    }
+    // Filtro de duração (só aplica se tivermos dados)
+    if(totalMin>0 && (totalMin<F.durMin || totalMin>F.durMax)) {
+      setPill('spotify',false);
+      continue;
+    }
+
+    setPill('mb',false);setPill('spotify',false);
+
+    // Monta objeto normalizado
+    const year = mbData?.date ? mbData.date.substring(0,4)
+                : (candidate.wiki?.published || '').substring(0,4) || '?';
+    const image = spData?.image || LastFmService.getBestImage(candidate.image) || '';
+    const id = spData?.spotifyId || mbData?.mbid || lfmId(candidate);
+
+    // Pula álbuns já no histórico (exceto se pool esgotado)
+    if(histIds.includes(id) && i < pool.length-1) continue;
+
+    return {
+      id,
+      name: albumName,
+      artist: artistName,
+      year,
+      type: F.type || 'album',
+      tracks: tracks.length ? tracks : [{n:1,name:'Tracklist indisponível',ms:0}],
+      totalTracks: tracks.length || candidate.tracks?.track?.length || 0,
+      durationMin: totalMin,
+      image,
+      genres: (candidate.tags?.tag || []).map(t=>t.name).slice(0,3),
+      popularity: parseInt(candidate.playcount||0),
+      url: spData?.url || candidate.url || '',
+      lastfmUrl: candidate.url || '',
+      label: mbData?.label || '',
+      country: mbData?.country || '',
+      mbid: mbData?.mbid || '',
+      // Flags de fonte para exibição
+      _sources: {
+        lastfm: true,
+        mb: !!mbData,
+        spotify: !!(spData?.image || spData?.url),
+      }
+    };
   }
   return null;
 }
- 
-function norm(full,min){
-  return{
-    id:full.id,name:full.name,
-    artist:full.artists.map(a=>a.name).join(', '),
-    year:(full.release_date||'?').substring(0,4),
-    type:full.album_type,
-    tracks:full.tracks.items.map(t=>({name:t.name,ms:t.duration_ms,n:t.track_number})),
-    totalTracks:full.total_tracks,durationMin:min,
-    image:full.images[0]?.url||'',genres:full.genres||[],
-    popularity:full.popularity||0,url:full.external_urls?.spotify||'',label:full.label||''
-  };
-}
- 
+
+// Gera um ID único para álbum Last.fm (sem Spotify ID)
+function lfmId(a){ return 'lfm_'+btoa(encodeURIComponent((a.artist?.name||'')+'-'+(a.name||''))).replace(/[^a-zA-Z0-9]/g,'').substring(0,24); }
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}return arr}
 function rnd(arr){return arr[Math.floor(Math.random()*arr.length)]}
- 
+
 // ═══════════════════════════════════════
 //  RENDER CARD
 // ═══════════════════════════════════════
 function renderCard(a){
-  const h=getH();const e=h.find(x=>x.id===a.id)||{};
+  const h=DBService.getHistory();const e=h.find(x=>x.id===a.id)||{};
   const r=e.rating||0;const lis=e.listened||false;
-  const tl=a.type==='album'?'ÁLBUM':a.type==='single'?'SINGLE/EP':a.type.toUpperCase();
-  const gs=a.genres.length?a.genres.slice(0,2).join(' · '):'Spotify';
+  const tl=a.type==='album'?'ÁLBUM':a.type==='single'?'SINGLE/EP':(a.type||'ÁLBUM').toUpperCase();
+  const gs=a.genres.length?a.genres.slice(0,2).join(' · '):selGenre.l||'';
+  const sources = a._sources||{};
   document.getElementById('card-wrap').innerHTML=`
+<div class="data-sources">
+  ${sources.lastfm?'<span class="ds-badge lastfm">Last.fm</span>':''}
+  ${sources.mb?'<span class="ds-badge mb">MusicBrainz</span>':''}
+  ${sources.spotify?'<span class="ds-badge spotify">Spotify</span>':''}
+</div>
 <div class="album-card">
   <div class="cover-wrap">
-    <img src="${x(a.image)}" alt="${x(a.name)}" loading="lazy">
+    <img src="${x(a.image)||'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23141414%22 width=%22200%22 height=%22200%22/%3E%3Ctext fill=%22%236a6560%22 font-size=%2248%22 text-anchor=%22middle%22 x=%22100%22 y=%22115%22%3E♪%3C/text%3E%3C/svg%3E'}" alt="${x(a.name)}" loading="lazy"
+      onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23141414%22 width=%22200%22 height=%22200%22/%3E%3Ctext fill=%22%236a6560%22 font-size=%2248%22 text-anchor=%22middle%22 x=%22100%22 y=%22115%22%3E♪%3C/text%3E%3C/svg%3E'">
     <div class="vinyl-shadow"></div>
     <span class="type-badge">${tl}</span>
   </div>
@@ -515,10 +918,13 @@ function renderCard(a){
       <div class="album-artist">${x(a.artist)}</div>
       <div class="album-meta">
         <span><span class="dot"></span>${a.year}</span>
-        <span><span class="dot"></span>${a.totalTracks} faixas</span>
-        <span><span class="dot"></span>${a.durationMin} min</span>
+        ${a.totalTracks?`<span><span class="dot"></span>${a.totalTracks} faixas</span>`:''}
+        ${a.durationMin?`<span><span class="dot"></span>${a.durationMin} min</span>`:''}
         ${a.label?`<span><span class="dot"></span>${x(a.label)}</span>`:''}
+        ${a.country?`<span><span class="dot"></span>${x(a.country)}</span>`:''}
       </div>
+      ${a.popularity>0?`<div class="lfm-stats"><span class="lfm-stat"><strong>${fmtNum(a.popularity)}</strong> plays Last.fm</span></div>`:''}
+      ${a.mbid?`<div class="mb-info">MBID: <span>${a.mbid.substring(0,18)}…</span></div>`:''}
     </div>
     <div>
       <div class="rating-section">
@@ -529,7 +935,8 @@ function renderCard(a){
         <button class="btn btn-listen${lis?' marked':''}" id="bl-${a.id}" onclick="togLis('${a.id}',this)">
           ${lis?'✓ Escutado':'+ Marcar como escutado'}
         </button>
-        ${a.url?`<a class="btn btn-spotify" href="${a.url}" target="_blank" rel="noopener">▶ Abrir no Spotify</a>`:''}
+        ${a.url?`<a class="btn btn-spotify" href="${x(a.url)}" target="_blank" rel="noopener">▶ Spotify</a>`:''}
+        ${a.lastfmUrl?`<a class="btn btn-lastfm" href="${x(a.lastfmUrl)}" target="_blank" rel="noopener">◉ Last.fm</a>`:''}
         <button class="btn btn-again" onclick="spin()">⟳ Outro álbum</button>
       </div>
       <div class="tracklist-section">
@@ -542,9 +949,9 @@ function renderCard(a){
   </div>
 </div>`;
 }
- 
+
 // ═══════════════════════════════════════
-//  STAR WIDGET (meia estrela)
+//  STAR WIDGET
 // ═══════════════════════════════════════
 function starWidget(id,cur){
   let h=`<div class="stars-container" id="sc-${id}">`;
@@ -560,12 +967,12 @@ function starWidget(id,cur){
   return h;
 }
 function pvw(id,v){setStar(id,v);const el=document.getElementById('rv-'+id);if(el)el.textContent=v.toFixed(1)}
-function rstPvw(id){const h=getH();const e=h.find(a=>a.id===id);const r=e?e.rating:0;setStar(id,r);const el=document.getElementById('rv-'+id);if(el)el.textContent=r?r.toFixed(1):'—'}
-function commitR(id,v){setRating(id,v);pvw(id,v)}
+function rstPvw(id){const h=DBService.getHistory();const e=h.find(a=>a.id===id);const r=e?e.rating:0;setStar(id,r);const el=document.getElementById('rv-'+id);if(el)el.textContent=r?r.toFixed(1):'—'}
+function commitR(id,v){DBService.setRating(id,v);pvw(id,v)}
 function setStar(id,v){for(let i=1;i<=5;i++){const u=document.getElementById(`su-${id}-${i}`);if(!u)continue;u.classList.remove('full','half');if(v>=i)u.classList.add('full');else if(v>=i-.5)u.classList.add('half')}}
-function togLis(id,btn){const h=getH();const e=h.find(a=>a.id===id);const nv=e?!e.listened:true;setListened(id,nv);btn.textContent=nv?'✓ Escutado':'+ Marcar como escutado';btn.classList.toggle('marked',nv);if(histOpen)renderHist()}
+function togLis(id,btn){const h=DBService.getHistory();const e=h.find(a=>a.id===id);const nv=e?!e.listened:true;DBService.setListened(id,nv);btn.textContent=nv?'✓ Escutado':'+ Marcar como escutado';btn.classList.toggle('marked',nv);if(histOpen)renderHist()}
 function togTL(btn){const l=btn.nextElementSibling;l.classList.toggle('open');const o=l.classList.contains('open');btn.querySelector('.tl-arrow').textContent=o?'▼':'▶';btn.childNodes[1].textContent=o?' Ocultar tracklist':' Ver tracklist'}
- 
+
 // ═══════════════════════════════════════
 //  HISTORY PANEL
 // ═══════════════════════════════════════
@@ -578,11 +985,12 @@ function toggleHistory(){
   if(histOpen)renderHist();
 }
 function renderHist(){
-  const g=document.getElementById('hist-grid');const h=getH();
+  const g=document.getElementById('hist-grid');const h=DBService.getHistory();
   if(!h.length){g.innerHTML='<div class="empty-state">Nenhum álbum no histórico ainda.</div>';return}
   g.innerHTML=h.map(a=>`
-<div class="history-item" onclick="loadH('${a.id}')">
-  <img src="${x(a.image)}" alt="${x(a.name)}" loading="lazy">
+<div class="history-item" onclick="loadAlbumFromHistory('${a.id}')">
+  <img src="${x(a.image||'')}" alt="${x(a.name)}" loading="lazy"
+    onerror="this.style.display='none'">
   ${a.listened?'<span class="listened-badge">✓</span>':''}
   <div class="history-meta">
     <div class="history-title">${x(a.name)}</div>
@@ -592,73 +1000,90 @@ function renderHist(){
 </div>`).join('');
 }
 function hStars(r){let h='';for(let i=1;i<=5;i++){h+=r>=i?'<span class="h-star">★</span>':r>=i-.5?'<span class="h-star">⯨</span>':'<span class="h-star empty">★</span>'}return h}
-async function loadH(id){
-  showLoad(true);hideRes();
-  try{const f=await spFetch(`/albums/${id}`);const ms=f.tracks.items.reduce((s,t)=>s+(t.duration_ms||0),0);curAlbum=norm(f,Math.round(ms/60000));renderCard(curAlbum);document.getElementById('result-section').style.display='block';document.getElementById('result-section').scrollIntoView({behavior:'smooth'})}
-  catch(e){showErr('Erro ao carregar álbum.')}
-  finally{showLoad(false)}
+function loadAlbumFromHistory(id){
+  const h=DBService.getHistory();const a=h.find(x=>x.id===id);
+  if(!a)return;curAlbum=a;renderCard(a);
+  document.getElementById('result-section').style.display='block';
+  document.getElementById('result-section').scrollIntoView({behavior:'smooth'});
 }
- 
+
 // ═══════════════════════════════════════
-//  AUTH UI SYNC
+//  PILL STATUS
+// ═══════════════════════════════════════
+function setPill(service, active){
+  const el = document.getElementById('pill-'+service);
+  if(!el)return;
+  el.classList.toggle('active', active);
+}
+
+// ═══════════════════════════════════════
+//  AUTH UI
 // ═══════════════════════════════════════
 function syncAuthUI(){
   const banner=document.getElementById('auth-banner');
   const txt=document.getElementById('auth-text');
   const btn=document.getElementById('auth-action-btn');
-  const sbtn=document.getElementById('spin-btn');
   if(loggedIn()){
     banner.classList.add('connected');
-    txt.innerHTML='✓ &nbsp;Conectado ao Spotify';
+    txt.innerHTML='✓ &nbsp;Conectado ao Spotify — capas em alta resolução ativadas';
     btn.textContent='Desconectar';btn.className='auth-btn logout';
-    sbtn.disabled=false;
+    setPill('spotify',true);
   }else{
     banner.classList.remove('connected');
-    txt.innerHTML='<strong>Conecte sua conta Spotify</strong> — gratuita ou Premium — para desbloquear recomendações ilimitadas com tracklist e duração real.';
+    txt.innerHTML='<strong>Conecte sua conta Spotify</strong> — gratuita ou Premium — para capas em alta resolução e links de escuta.';
     btn.textContent='Entrar com Spotify';btn.className='auth-btn login';
-    sbtn.disabled=true;
+    setPill('spotify',false);
   }
 }
- 
+
 // ═══════════════════════════════════════
 //  HELPERS
 // ═══════════════════════════════════════
-function showLoad(on){document.getElementById('load-wrap').style.display=on?'block':'none'}
+function showLoad(on){
+  document.getElementById('load-wrap').style.display=on?'block':'none';
+  document.getElementById('loading-steps').classList.toggle('on',on);
+  if(on){['ls1','ls2','ls3'].forEach(id=>{const e=document.getElementById(id);if(e){e.classList.remove('active','done')}})}
+}
 function hideRes(){document.getElementById('result-section').style.display='none'}
 function showErr(m){document.getElementById('result-section').style.display='block';document.getElementById('card-wrap').innerHTML=`<div class="notice"><strong>Ops!</strong><br>${m}</div>`}
 function fmt(ms){if(!ms)return'—';const m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000);return`${m}:${s.toString().padStart(2,'0')}`}
+function fmtNum(n){if(!n)return'';if(n>1000000)return(n/1000000).toFixed(1)+'M';if(n>1000)return(n/1000).toFixed(0)+'K';return n}
 function x(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
- 
+function syncStats(){
+  const h=DBService.getHistory();
+  const n=h.filter(a=>a.listened).length;
+  document.getElementById('stat-listened').textContent=n;
+  document.getElementById('listened-badge').textContent=n+' escutados';
+}
+function clearHist(){DBService.clear()}
+
 // ═══════════════════════════════════════
 //  BOOT
 // ═══════════════════════════════════════
 (async function boot(){
   buildGenres();syncStats();
-  // Mantém botão desabilitado até o boot terminar
-  document.getElementById('spin-btn').disabled=true;
+  setPill('db',true); // DB local sempre ativo
+  document.getElementById('spin-btn').disabled=false; // funciona sem Spotify
+
   const p=new URLSearchParams(location.search);
   const code=p.get('code'),err=p.get('error');
-  // Limpa a URL imediatamente
   if(code||err) history.replaceState({},'',location.pathname);
+
   if(err){
     showErr('Login cancelado ou negado pelo Spotify.');
     document.getElementById('result-section').style.display='block';
-  }else if(code){
-    try{
-      // Limpa tokens antigos e troca pelo novo
+  } else if(code){
+    try {
       ['sp_at','sp_exp','sp_rt'].forEach(k=>localStorage.removeItem(k));
       await exchangeCode(code);
-      // Pequena pausa para garantir que o token foi salvo
       await new Promise(r=>setTimeout(r,300));
-    }
-    catch(e){
+    } catch(e){
       console.error('Auth error:',e);
       showErr('Erro no login com Spotify.<br><small>'+e.message+'</small>');
       document.getElementById('result-section').style.display='block';
     }
   }
   syncAuthUI();
-  // syncAuthUI já habilita o botão se logado
 })();
 </script>
 </body>
