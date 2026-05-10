@@ -414,7 +414,7 @@ async function fetchAlbum(){
   const histIds=h.map(a=>a.id);
   let q=selGenre.q||rnd(FALLBACK);
   if(F.eraFrom>1900||F.eraTo<2099)q+=` year:${F.eraFrom}-${F.eraTo}`;
-  const tp=F.type?`&type=${F.type}`:'&type=album';
+  const tp=F.type?`&type=${F.type}`:'&type=album,single';
   const off=Math.floor(Math.random()*40);
   const d=await spFetch(`/search?q=${encodeURIComponent(q)}${tp}&limit=50&offset=${off}`);
   let items=(d.albums||{}).items?.filter(Boolean)||[];
