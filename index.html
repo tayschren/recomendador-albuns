@@ -327,6 +327,7 @@ function handleAuth(){loggedIn()?doLogout():startLogin()}
 async function spFetch(path, _retry=false){
   const token=await getAT();
   console.log('[spFetch]', 'https://api.spotify.com/v1'+path);
+  console.log('[token]', token ? token.substring(0,20)+'...' : 'NULL/EMPTY');
   const r=await fetch('https://api.spotify.com/v1'+path,{headers:{Authorization:'Bearer '+token}});
   if(r.status===401){
     if(_retry) throw new Error('Token inválido após refresh. Faça login novamente.');
@@ -431,18 +432,10 @@ async function fetchAlbum(){
   const histIds=h.map(a=>a.id);
   let q=selGenre.q||rnd(FALLBACK);
   if(F.eraFrom>1900||F.eraTo<2099)q+=` year:${F.eraFrom}-${F.eraTo}`;
-  // Spotify: tenta com offset aleatorio, cai para 0 se der erro
-  const LIMIT=50;
-  const off=Math.floor(Math.random()*10)*LIMIT; // 0,50,...,450 — conservador
-  let d;
-  try{
-    d=await spFetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=${LIMIT}&offset=${off}&market=BR`);
-  }catch(e){
-    if(e.message.includes('400')){
-      // offset pode ter ultrapassado resultados disponiveis, tenta com offset=0
-      d=await spFetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=${LIMIT}&offset=0&market=BR`);
-    }else throw e;
-  }
+  // Dev Mode do Spotify limita search a limit=10 (max) desde fev/2026
+  const LIMIT=10;
+  const off=Math.floor(Math.random()*20)*LIMIT; // 0,10,20,...,190
+  const d=await spFetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=${LIMIT}&offset=${off}&market=BR`);
   let items=(d.albums||{}).items?.filter(Boolean)||[];
   if(F.type)items=items.filter(it=>(it.album_type||'').toLowerCase()===F.type);
   items=items.filter(it=>{const y=parseInt((it.release_date||'0').substring(0,4));return y>=F.eraFrom&&y<=F.eraTo});
@@ -618,18 +611,22 @@ function x(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')
 // ═══════════════════════════════════════
 (async function boot(){
   buildGenres();syncStats();
+  // Mantém botão desabilitado até o boot terminar
+  document.getElementById('spin-btn').disabled=true;
   const p=new URLSearchParams(location.search);
   const code=p.get('code'),err=p.get('error');
-  // Limpa a URL imediatamente para evitar que o ?code= interfira
+  // Limpa a URL imediatamente
   if(code||err) history.replaceState({},'',location.pathname);
   if(err){
     showErr('Login cancelado ou negado pelo Spotify.');
     document.getElementById('result-section').style.display='block';
   }else if(code){
     try{
-      // Limpa tokens antigos antes de trocar o novo código
+      // Limpa tokens antigos e troca pelo novo
       ['sp_at','sp_exp','sp_rt'].forEach(k=>localStorage.removeItem(k));
       await exchangeCode(code);
+      // Pequena pausa para garantir que o token foi salvo
+      await new Promise(r=>setTimeout(r,300));
     }
     catch(e){
       console.error('Auth error:',e);
@@ -638,6 +635,7 @@ function x(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')
     }
   }
   syncAuthUI();
+  // syncAuthUI já habilita o botão se logado
 })();
 </script>
 </body>
