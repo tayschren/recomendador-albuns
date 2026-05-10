@@ -418,11 +418,18 @@ async function fetchAlbum(){
   const histIds=h.map(a=>a.id);
   let q=selGenre.q||rnd(FALLBACK);
   if(F.eraFrom>1900||F.eraTo<2099)q+=` year:${F.eraFrom}-${F.eraTo}`;
-  // Spotify: limit=50 (max), offset em multiplos de 50 ate 950
+  // Spotify: tenta com offset aleatorio, cai para 0 se der erro
   const LIMIT=50;
-  const off=Math.floor(Math.random()*19)*LIMIT;
-  const url=`/search?q=${encodeURIComponent(q)}&type=album&limit=${LIMIT}&offset=${off}&market=BR`;
-  const d=await spFetch(url);
+  const off=Math.floor(Math.random()*10)*LIMIT; // 0,50,...,450 — conservador
+  let d;
+  try{
+    d=await spFetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=${LIMIT}&offset=${off}&market=BR`);
+  }catch(e){
+    if(e.message.includes('400')){
+      // offset pode ter ultrapassado resultados disponiveis, tenta com offset=0
+      d=await spFetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=${LIMIT}&offset=0&market=BR`);
+    }else throw e;
+  }
   let items=(d.albums||{}).items?.filter(Boolean)||[];
   if(F.type)items=items.filter(it=>(it.album_type||'').toLowerCase()===F.type);
   items=items.filter(it=>{const y=parseInt((it.release_date||'0').substring(0,4));return y>=F.eraFrom&&y<=F.eraTo});
