@@ -229,6 +229,8 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
 .history-stars-row{display:flex;align-items:center;gap:2px}
 .h-star{font-size:.8rem;color:var(--accent)}.h-star.empty{color:var(--border)}
 .listened-badge{position:absolute;top:6px;right:6px;background:var(--success);color:#000;font-size:.55rem;padding:2px 5px;letter-spacing:.06em;text-transform:uppercase}
+.fav-badge{position:absolute;top:6px;left:6px;background:var(--accent);color:#000;font-size:.6rem;padding:2px 5px;}
+.history-note-text{font-size:.58rem;color:var(--muted);font-style:italic;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .empty-state{color:var(--muted);font-size:.78rem;padding:44px 0;text-align:center;letter-spacing:.06em;grid-column:1/-1}
 
 /* SUPABASE MIGRATION NOTE */
@@ -520,6 +522,8 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
 ═══════════════════════════════════════ */
 .btn-share{border-color:#e8c84a88;color:var(--accent)}
 .btn-share:hover{background:var(--accent);color:#000}
+.btn-youtube{border-color:#FF0000;color:#FF0000}
+.btn-youtube:hover{background:#FF0000;color:#fff}
 .share-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:700;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
 .share-modal.open{display:flex;animation:fadeUp .22s ease both}
 .share-box{background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--accent);padding:28px;max-width:400px;width:92%;position:relative}
@@ -683,6 +687,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
       <label>Opções</label>
       <div class="chips">
         <button class="chip" id="excl-chip" onclick="toggleExcl(this)">Excluir já escutados</button>
+        <button class="chip" id="fast-chip" onclick="toggleFastMode(this)" title="Pula MusicBrainz — resultado mais rápido, menos metadados">⚡ Modo Rápido</button>
       </div>
     </div>
 
@@ -692,7 +697,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
     </div>
 
     <button class="spin-btn" id="spin-btn" onclick="spin()">⟳ &nbsp; GIRAR O DISCO</button>
-    <p class="spin-btn-note">Descoberta via <span>Last.fm</span> · funciona sem login</p>
+    <p class="spin-btn-note">Descoberta via <span>Last.fm</span> · atalho: <kbd style="background:var(--border);padding:1px 5px;font-size:.58rem">Espaço</kbd></p>
   </div>
 </section>
 
@@ -846,6 +851,7 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
     <div class="share-actions">
       <button class="share-action-btn" id="share-copy-btn" onclick="copyShareText()">📋 Copiar texto</button>
       <button class="share-action-btn" id="share-tweet-btn" onclick="shareTweet()">𝕏 Twitter</button>
+      <button class="share-action-btn" id="share-yt-btn" onclick="shareYoutube()" style="color:#FF0000;border-color:#FF000055">▶ YouTube</button>
       <button class="share-action-btn" id="share-native-btn" onclick="shareNative()" style="display:none">↗ Compartilhar</button>
     </div>
   </div>
@@ -1218,6 +1224,12 @@ async function shareNative(){
   try {
     await navigator.share({ title: curAlbum.name+' — '+curAlbum.artist, text: buildShareText(curAlbum), url: curAlbum.url||curAlbum.lastfmUrl||'' });
   } catch(e){ /* cancelled */ }
+}
+
+function shareYoutube(){
+  if(!curAlbum) return;
+  const q = encodeURIComponent(curAlbum.artist+' '+curAlbum.name+' full album');
+  window.open('https://www.youtube.com/results?search_query='+q, '_blank', 'noopener');
 }
 
 document.addEventListener('DOMContentLoaded',function(){
@@ -1751,9 +1763,9 @@ function openAlbumPage(a){
     ${renderObscurityBadge(a.popularity)}
     <div style="margin-top:14px">
       ${a.url?`<a class="btn btn-spotify" style="display:inline-flex;margin-bottom:6px" href="${x(a.url)}" target="_blank" rel="noopener">▶ Ouvir no Spotify</a>`:''}
-      ${a.lastfmUrl?`<a class="btn btn-lastfm" style="display:inline-flex" href="${x(a.lastfmUrl)}" target="_blank" rel="noopener">◉ Ver no Last.fm</a>`:''}
+      ${a.lastfmUrl?`<a class="btn btn-lastfm" style="display:inline-flex;margin-bottom:6px" href="${x(a.lastfmUrl)}" target="_blank" rel="noopener">◉ Ver no Last.fm</a>`:''}
+      <a class="btn btn-youtube" style="display:inline-flex" href="https://www.youtube.com/results?search_query=${encodeURIComponent(a.artist+' '+a.name+' full album')}" target="_blank" rel="noopener">▶ Ver no YouTube</a>
     </div>
-  </div>
   <div class="album-page-right">
     <div>
       <div class="album-page-title">${x(a.name)}</div>
@@ -1926,7 +1938,7 @@ function filterGenres(v){const q=v.toLowerCase();genreBtns.forEach(b=>{b.style.d
 // ═══════════════════════════════════════
 //  FILTER STATE
 // ═══════════════════════════════════════
-let F={durMin:0,durMax:9999,type:'',eraFrom:1900,eraTo:2099,excl:false};
+let F={durMin:0,durMax:9999,type:'',eraFrom:1900,eraTo:2099,excl:false,fast:false};
 function pick(el,g){
   document.querySelectorAll('#'+g+'-chips .chip').forEach(c=>c.classList.remove('active'));
   el.classList.add('active');
@@ -1935,6 +1947,7 @@ function pick(el,g){
   if(g==='era'){F.eraFrom=+el.dataset.from;F.eraTo=+el.dataset.to}
 }
 function toggleExcl(el){F.excl=!F.excl;el.classList.toggle('active',F.excl)}
+function toggleFastMode(el){F.fast=!F.fast;el.classList.toggle('active',F.fast)}
 
 // ═══════════════════════════════════════
 //  LOADING STEPS UI
@@ -2033,7 +2046,7 @@ async function fetchAlbumMultiSource(){
     if(!albumName || !artistName) continue;
 
     // Busca metadados no MusicBrainz
-    const mbData = await MusicBrainzService.searchRelease(albumName, artistName);
+    const mbData = F.fast ? null : await MusicBrainzService.searchRelease(albumName, artistName);
 
     // Filtro de época via MusicBrainz
     if(mbData?.date){
@@ -2054,7 +2067,6 @@ async function fetchAlbumMultiSource(){
     if(!tracks.length && mbData?.mbid){
       tracks = await MusicBrainzService.getTracklist(mbData.mbid);
     }
-    // Calcula duração
     if(tracks.length){
       totalMin = Math.round(tracks.reduce((s,t)=>s+(t.ms||0),0)/60000);
     } else {
@@ -2171,6 +2183,7 @@ function renderCard(a, adventureMode){
         <button class="btn" onclick="openAlbumPage(curAlbum)" style="border-color:var(--info);color:var(--info)">⊞ Página do Álbum</button>
         ${a.url?`<a class="btn btn-spotify" href="${x(a.url)}" target="_blank" rel="noopener">▶ Spotify</a>`:''}
         ${a.lastfmUrl?`<a class="btn btn-lastfm" href="${x(a.lastfmUrl)}" target="_blank" rel="noopener">◉ Last.fm</a>`:''}
+        <a class="btn btn-youtube" href="https://www.youtube.com/results?search_query=${encodeURIComponent(a.artist+' '+a.name+' full album')}" target="_blank" rel="noopener">▶ YouTube</a>
         <button class="btn btn-again" onclick="spin()">⟳ Outro álbum</button>
         ${a._artistMode ? `<button class="btn" style="border-color:#9b59b6;color:#9b59b6" onclick="spinBySpecificArtist('${x(a.artist)}')">⟳ Mais de ${x(a.artist)}</button>` : ''}
         <button class="btn btn-wishlist${WishlistService.has(a.id)?' in-wishlist':''}" id="bw-${a.id}" onclick="togWish('${a.id}',this)">
@@ -2559,6 +2572,15 @@ function clearHist(){DBService.clear()}
   prevEarnedBadges = checkBadges(false);
   setPill('db',true); // DB local sempre ativo
   document.getElementById('spin-btn').disabled=false; // funciona sem Spotify
+
+  // Atalho de teclado: Space = girar (quando não estiver em campo de texto)
+  document.addEventListener('keydown', e => {
+    if(e.code === 'Space' && !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)){
+      e.preventDefault();
+      const btn = document.getElementById('spin-btn');
+      if(btn && !btn.disabled) spin();
+    }
+  });
 
   const p=new URLSearchParams(location.search);
   const code=p.get('code'),err=p.get('error');
