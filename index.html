@@ -430,14 +430,33 @@ async function fetchAlbum(){
   const h=getH();
   const listenedIds=h.filter(a=>a.listened).map(a=>a.id);
   const histIds=h.map(a=>a.id);
-  let q=selGenre.q||rnd(FALLBACK);
-  if(F.eraFrom>1900||F.eraTo<2099)q+=` year:${F.eraFrom}-${F.eraTo}`;
-  // Dev Mode do Spotify limita search a limit=10 (max) desde fev/2026
   const LIMIT=10;
-  const off=Math.floor(Math.random()*20)*LIMIT; // 0,10,20,...,190
-  const d=await spFetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=${LIMIT}&offset=${off}&market=BR`);
-  let items=(d.albums||{}).items?.filter(Boolean)||[];
-  if(F.type)items=items.filter(it=>(it.album_type||'').toLowerCase()===F.type);
+
+  // genre: funciona melhor buscando artistas, depois pegando albums deles
+  const fallbackGenres=['genre:rock','genre:pop','genre:jazz','genre:electronic','genre:classical','genre:soul','genre:blues','genre:country','genre:reggae','genre:metal'];
+  const genreQ=selGenre.q||rnd(fallbackGenres);
+
+  // 1. Busca artistas do genero
+  const off=Math.floor(Math.random()*20)*LIMIT;
+  const ar=await spFetch(`/search?q=${encodeURIComponent(genreQ)}&type=artist&limit=${LIMIT}&offset=${off}&market=BR`);
+  const artists=(ar.artists||{}).items?.filter(Boolean)||[];
+  if(!artists.length) return null;
+
+  // 2. Pega albuns de artistas aleatorios do resultado
+  let items=[];
+  const typeQ=F.type?`&include_groups=${F.type}`:'&include_groups=album,single';
+  const picked=[];
+  for(let i=0;i<Math.min(4,artists.length);i++) picked.push(rnd(artists));
+  for(const artist of picked){
+    try{
+      const alb=await spFetch(`/artists/${artist.id}/albums?limit=10&market=BR${typeQ}`);
+      items=items.concat((alb.items||[]).filter(Boolean));
+    }catch(_){}
+  }
+
+  // Deduplica, filtra epoca e preferencias
+  items=[...new Map(items.map(i=>[i.id,i])).values()];
+  if(F.type) items=items.filter(it=>(it.album_type||'').toLowerCase()===F.type);
   items=items.filter(it=>{const y=parseInt((it.release_date||'0').substring(0,4));return y>=F.eraFrom&&y<=F.eraTo});
   if(F.excl)items=items.filter(it=>!listenedIds.includes(it.id));
   if(!items.length)return null;
