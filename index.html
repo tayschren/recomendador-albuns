@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="description" content="SPINREC — Descubra álbuns via Last.fm, MusicBrainz e Spotify">
+<link rel="manifest" href="manifest.json">
 <title>SPINREC — Descubra Álbuns</title>
 <!--
   ╔══════════════════════════════════════════════════════════════╗
@@ -423,6 +426,134 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
 .toast-icon{font-size:1.6rem;line-height:1}
 .toast-text strong{color:var(--accent);display:block;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
 .country-origin-badge{font-size:.6rem;padding:2px 7px;border:1px solid var(--mb);color:var(--mb);letter-spacing:.08em;text-transform:uppercase;display:inline-block;margin-left:6px}
+
+/* ═══════════════════════════════════════
+   BUSCA DIRETA DE ÁLBUM
+═══════════════════════════════════════ */
+.search-panel{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--info);padding:18px 20px;margin-bottom:0;display:none;animation:fadeUp .25s ease both}
+.search-panel.open{display:block}
+.search-panel-title{font-size:.6rem;text-transform:uppercase;letter-spacing:.14em;color:var(--info);margin-bottom:12px}
+.search-row{display:flex;gap:8px;flex-wrap:wrap}
+.search-input{flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.72rem;padding:8px 12px;outline:none;letter-spacing:.04em;transition:border-color .15s}
+.search-input:focus{border-color:var(--info)}
+.search-input::placeholder{color:var(--muted)}
+.search-go-btn{background:var(--info);border:none;color:#000;font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:.12em;padding:8px 20px;cursor:pointer;white-space:nowrap;transition:opacity .15s}
+.search-go-btn:hover{opacity:.85}
+.search-go-btn:disabled{opacity:.45;cursor:not-allowed}
+.search-results{margin-top:12px;display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto}
+.search-result-item{display:flex;align-items:center;gap:12px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
+.search-result-item:hover{border-color:var(--info)}
+.search-result-img{width:36px;height:36px;object-fit:cover;flex-shrink:0;background:var(--border)}
+.search-result-info{flex:1;min-width:0}
+.search-result-title{font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-result-artist{font-size:.6rem;color:var(--muted)}
+.search-empty{font-size:.7rem;color:var(--muted);padding:12px 0;text-align:center;letter-spacing:.04em}
+
+/* ═══════════════════════════════════════
+   ARTISTAS SIMILARES — card
+═══════════════════════════════════════ */
+.similar-section{margin-top:20px;border-top:1px solid var(--border);padding-top:16px}
+.similar-label{font-size:.6rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.similar-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.similar-artists{display:flex;gap:8px;flex-wrap:wrap}
+.similar-artist-btn{background:none;border:1px solid var(--border);color:var(--muted);font-family:'DM Mono',monospace;font-size:.65rem;padding:5px 11px;cursor:pointer;letter-spacing:.04em;transition:all .16s;display:flex;align-items:center;gap:5px}
+.similar-artist-btn:hover{border-color:var(--accent);color:var(--accent)}
+.similar-artist-btn .sim-icon{opacity:.5;font-size:.7rem}
+.similar-loading{font-size:.62rem;color:var(--muted);letter-spacing:.04em;animation:pulse 1.5s infinite}
+
+/* ═══════════════════════════════════════
+   MODO ARTISTA ESPECÍFICO
+═══════════════════════════════════════ */
+.artist-mode-panel{background:var(--surface);border:1px solid var(--border);border-left:3px solid #9b59b6;padding:18px 20px;display:none;animation:fadeUp .25s ease both}
+.artist-mode-panel.open{display:block}
+.artist-mode-title{font-size:.6rem;text-transform:uppercase;letter-spacing:.14em;color:#9b59b6;margin-bottom:12px}
+.artist-input-row{display:flex;gap:8px;flex-wrap:wrap}
+.artist-input{flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.72rem;padding:8px 12px;outline:none;letter-spacing:.04em;transition:border-color .15s}
+.artist-input:focus{border-color:#9b59b6}
+.artist-input::placeholder{color:var(--muted)}
+.artist-spin-btn{background:#9b59b6;border:none;color:#fff;font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:.12em;padding:8px 20px;cursor:pointer;white-space:nowrap;transition:opacity .15s}
+.artist-spin-btn:hover{opacity:.85}
+.artist-spin-btn:disabled{opacity:.45;cursor:not-allowed}
+.artist-mode-note{font-size:.6rem;color:var(--muted);margin-top:8px;letter-spacing:.03em}
+
+/* ═══════════════════════════════════════
+   WISHLIST
+═══════════════════════════════════════ */
+#wishlist-section{display:none;margin-top:32px}
+#wishlist-section.open{display:block;animation:fadeUp .3s ease both}
+.btn-wishlist{border-color:#7dcfff88;color:var(--info)}
+.btn-wishlist:hover,.btn-wishlist.in-wishlist{background:#7dcfff11;border-color:var(--info);color:var(--info)}
+.btn-wishlist.in-wishlist::before{content:'✓ ';}
+.wishlist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:14px}
+.wishlist-item{background:var(--surface);border:1px solid var(--info);cursor:pointer;transition:border-color .18s,transform .18s;position:relative;overflow:hidden}
+.wishlist-item:hover{border-color:var(--accent);transform:translateY(-3px)}
+.wishlist-item img{width:100%;aspect-ratio:1;object-fit:cover;display:block;filter:saturate(.8);transition:filter .2s}
+.wishlist-item:hover img{filter:saturate(1)}
+.wishlist-meta{padding:9px 10px}
+.wishlist-title{font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}
+.wishlist-artist{font-size:.62rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
+.wishlist-remove{position:absolute;top:5px;right:5px;background:#000c;border:none;color:var(--muted);font-size:.75rem;cursor:pointer;padding:2px 5px;line-height:1;transition:color .15s}
+.wishlist-remove:hover{color:var(--accent2)}
+.wishlist-badge{position:absolute;top:6px;left:6px;background:var(--info);color:#000;font-size:.5rem;padding:2px 5px;letter-spacing:.06em;text-transform:uppercase}
+
+/* ═══════════════════════════════════════
+   GRÁFICOS DA COLEÇÃO
+═══════════════════════════════════════ */
+.collection-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+@media(max-width:700px){.collection-charts{grid-template-columns:1fr}}
+.chart-card{background:var(--surface);border:1px solid var(--border);padding:16px 18px}
+.chart-card-title{font-size:.6rem;text-transform:uppercase;letter-spacing:.13em;color:var(--muted);margin-bottom:14px}
+.chart-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.chart-bar-label{font-size:.6rem;color:var(--muted);width:80px;text-align:right;flex-shrink:0;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chart-bar-track{flex:1;height:8px;background:var(--border);position:relative;overflow:hidden}
+.chart-bar-fill{height:100%;background:var(--accent);transition:width .6s ease;border-radius:0}
+.chart-bar-val{font-size:.6rem;color:var(--muted);width:28px;flex-shrink:0;letter-spacing:.02em}
+.chart-decade-row{display:flex;align-items:flex-end;gap:4px;height:80px;margin-bottom:8px}
+.chart-decade-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.chart-decade-bar{width:100%;background:var(--accent);transition:height .6s ease;min-height:2px}
+.chart-decade-lbl{font-size:.5rem;color:var(--muted);letter-spacing:.03em;text-align:center;white-space:nowrap}
+.chart-radar-wrap{display:flex;justify-content:center;padding:4px 0}
+.chart-empty{font-size:.68rem;color:var(--muted);text-align:center;padding:28px 0;letter-spacing:.04em}
+
+/* ═══════════════════════════════════════
+   COMPARTILHAR CARD
+═══════════════════════════════════════ */
+.btn-share{border-color:#e8c84a88;color:var(--accent)}
+.btn-share:hover{background:var(--accent);color:#000}
+.share-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:700;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
+.share-modal.open{display:flex;animation:fadeUp .22s ease both}
+.share-box{background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--accent);padding:28px;max-width:400px;width:92%;position:relative}
+.share-box h3{font-family:'DM Serif Display',serif;font-size:1.3rem;font-weight:400;margin-bottom:16px}
+.share-card-preview{background:var(--bg);border:1px solid var(--border);padding:16px;margin-bottom:16px;position:relative;overflow:hidden}
+.share-card-preview::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--lastfm),var(--accent),#1DB954)}
+.scp-top{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
+.scp-img{width:56px;height:56px;object-fit:cover;flex-shrink:0;background:var(--border)}
+.scp-info{flex:1;min-width:0}
+.scp-title{font-family:'DM Serif Display',serif;font-size:1rem;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scp-artist{font-size:.68rem;color:var(--muted);margin-top:2px}
+.scp-year{font-size:.6rem;color:var(--accent);margin-top:3px;letter-spacing:.06em}
+.scp-badge-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.scp-obscurity{font-size:.58rem;padding:3px 8px;border:1px solid var(--accent);color:var(--accent);letter-spacing:.08em;text-transform:uppercase}
+.scp-rating{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--accent);letter-spacing:.06em}
+.scp-brand{font-size:.55rem;color:var(--muted);letter-spacing:.1em;text-align:right;margin-top:10px;text-transform:uppercase}
+.share-actions{display:flex;gap:8px;flex-wrap:wrap}
+.share-action-btn{flex:1;background:none;border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.68rem;padding:9px 12px;cursor:pointer;letter-spacing:.06em;text-transform:uppercase;transition:all .14s;text-align:center}
+.share-action-btn:hover{border-color:var(--accent);color:var(--accent)}
+.share-action-btn.copied{border-color:var(--success);color:var(--success)}
+.share-close{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer}
+.share-close:hover{color:var(--text)}
+
+/* ═══════════════════════════════════════
+   PWA INSTALL BANNER
+═══════════════════════════════════════ */
+.pwa-banner{display:none;position:fixed;bottom:16px;left:16px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--success);padding:12px 16px;z-index:200;max-width:300px;animation:fadeUp .3s ease both}
+.pwa-banner.visible{display:flex;align-items:center;gap:12px}
+.pwa-banner p{font-size:.68rem;color:var(--muted);letter-spacing:.03em;line-height:1.5}
+.pwa-banner p strong{color:var(--success)}
+.pwa-install-btn{background:var(--success);border:none;color:#000;font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:.1em;padding:7px 14px;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
+.pwa-install-btn:hover{opacity:.85}
+.pwa-dismiss{background:none;border:none;color:var(--muted);font-size:.9rem;cursor:pointer;padding:2px;flex-shrink:0}
+.pwa-dismiss:hover{color:var(--text)}
 </style>
 </head>
 <body>
@@ -431,9 +562,12 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
   <div class="logo">SPIN<span>REC</span></div>
   <div class="header-right">
     <span class="header-badge" id="listened-badge">0 escutados</span>
+    <button class="header-btn" id="search-btn" onclick="toggleSearchPanel()" title="Buscar álbum específico">🔍 Buscar</button>
+    <button class="header-btn" id="artist-btn" onclick="toggleArtistPanel()" title="Girar por artista">🎤 Artista</button>
     <button class="header-btn collection-btn" id="coll-btn" onclick="toggleCollection()">🏆 Coleção</button>
     <button class="header-btn btn-adventure" onclick="openAdventure()">🎲 Aventura</button>
     <button class="header-btn" id="hist-btn" onclick="toggleHistory()">Histórico</button>
+    <button class="header-btn" id="wishlist-btn" onclick="toggleWishlist()" title="Quero ouvir">🔖 Wishlist</button>
   </div>
 </header>
 
@@ -454,6 +588,27 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
   <div class="source-pill db" id="pill-db" title="Banco local (localStorage → Supabase)">
     <span class="source-dot"></span> DB local
   </div>
+</div>
+
+<!-- BUSCA DIRETA -->
+<div class="search-panel" id="search-panel">
+  <div class="search-panel-title">🔍 Busca Direta — salva um álbum que você já conhece</div>
+  <div class="search-row">
+    <input class="search-input" id="search-album" type="text" placeholder="Nome do álbum…" oninput="debouncedSearch()" onkeydown="if(event.key==='Enter')doSearch()">
+    <input class="search-input" id="search-artist" type="text" placeholder="Artista (opcional)" onkeydown="if(event.key==='Enter')doSearch()">
+    <button class="search-go-btn" id="search-go-btn" onclick="doSearch()">Buscar</button>
+  </div>
+  <div class="search-results" id="search-results"></div>
+</div>
+
+<!-- MODO ARTISTA ESPECÍFICO -->
+<div class="artist-mode-panel" id="artist-mode-panel">
+  <div class="artist-mode-title">🎤 Modo Artista — descubra a discografia de quem você ama</div>
+  <div class="artist-input-row">
+    <input class="artist-input" id="artist-name-input" type="text" placeholder="Nome do artista (ex: Miles Davis, Caetano Veloso)…" onkeydown="if(event.key==='Enter')spinByArtist()">
+    <button class="artist-spin-btn" id="artist-spin-btn" onclick="spinByArtist()">⟳ GIRAR</button>
+  </div>
+  <p class="artist-mode-note">Sorteia um álbum que você ainda não escutou desse artista</p>
 </div>
 
 <div id="auth-banner">
@@ -601,8 +756,18 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
       <p class="section-label" style="margin-bottom:0;flex:1">Sua Coleção</p>
     </div>
     <div class="collection-stats" id="coll-stats"></div>
+    <p class="section-label">Gráficos</p>
+    <div class="collection-charts" id="collection-charts"></div>
     <p class="section-label">Conquistas</p>
     <div class="badges-grid" id="badges-grid"></div>
+  </div>
+  <!-- WISHLIST SECTION -->
+  <div id="wishlist-section">
+    <div class="history-header">
+      <p class="section-label" style="margin-bottom:0;flex:1">🔖 Quero Ouvir <span id="wishlist-count" style="font-size:.62rem;color:var(--info);margin-left:8px"></span></p>
+      <button class="clear-btn" onclick="clearWishlist()">Limpar wishlist</button>
+    </div>
+    <div class="wishlist-grid" id="wishlist-grid"></div>
   </div>
 </main>
 
@@ -672,8 +837,530 @@ hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
   Migre para Supabase para sync entre dispositivos.
 </div>
 
+<!-- SHARE MODAL -->
+<div class="share-modal" id="share-modal">
+  <div class="share-box">
+    <button class="share-close" onclick="closeShareModal()">×</button>
+    <h3>Compartilhar Álbum</h3>
+    <div class="share-card-preview" id="share-preview"></div>
+    <div class="share-actions">
+      <button class="share-action-btn" id="share-copy-btn" onclick="copyShareText()">📋 Copiar texto</button>
+      <button class="share-action-btn" id="share-tweet-btn" onclick="shareTweet()">𝕏 Twitter</button>
+      <button class="share-action-btn" id="share-native-btn" onclick="shareNative()" style="display:none">↗ Compartilhar</button>
+    </div>
+  </div>
+</div>
+
+<!-- PWA INSTALL BANNER -->
+<div class="pwa-banner" id="pwa-banner">
+  <div>
+    <p><strong>📱 Instalar SPINREC</strong><br>Acesso rápido e funciona offline</p>
+  </div>
+  <button class="pwa-install-btn" id="pwa-install-btn" onclick="installPWA()">Instalar</button>
+  <button class="pwa-dismiss" onclick="dismissPWA()">×</button>
+</div>
+
 <script>
-// ╔══════════════════════════════════════════════════════════════╗
+// ════════════════════════════════════════════════════════════════
+//  SPINREC — NOVAS FEATURES v2
+//  · Busca direta (Last.fm search)
+//  · Artistas similares no card (artist.getSimilar)
+//  · Modo artista específico (artist.getTopAlbums)
+//  · Gráficos da coleção (radar gênero, timeline décadas)
+//  · Wishlist separada do histórico
+//  · Compartilhar card (texto + tweet + Web Share API)
+//  · PWA básico (manifest + service worker)
+// ════════════════════════════════════════════════════════════════
+
+// ══════════════════════
+//  BUSCA DIRETA
+// ══════════════════════
+let searchDebounceTimer = null;
+let searchPanelOpen = false;
+function toggleSearchPanel(){
+  searchPanelOpen = !searchPanelOpen;
+  document.getElementById('search-panel').classList.toggle('open', searchPanelOpen);
+  document.getElementById('search-btn').classList.toggle('active', searchPanelOpen);
+  if(searchPanelOpen) document.getElementById('search-album').focus();
+  // Close artist panel if open
+  if(searchPanelOpen && artistPanelOpen) toggleArtistPanel();
+}
+
+function debouncedSearch(){
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(()=>{
+    const q = document.getElementById('search-album').value.trim();
+    if(q.length >= 3) doSearch();
+    else document.getElementById('search-results').innerHTML='';
+  }, 400);
+}
+
+async function doSearch(){
+  const albumQ = document.getElementById('search-album').value.trim();
+  const artistQ = document.getElementById('search-artist').value.trim();
+  if(!albumQ) return;
+
+  const btn = document.getElementById('search-go-btn');
+  btn.disabled = true;
+  btn.textContent = '…';
+  document.getElementById('search-results').innerHTML = '<div class="search-empty">Buscando…</div>';
+
+  try {
+    // Last.fm album.search
+    const url = `${LASTFM_BASE}/?method=album.search&album=${encodeURIComponent(albumQ)}&api_key=${LASTFM_API_KEY}&format=json&limit=8`;
+    const r = await fetch(url);
+    const d = await r.json();
+    let results = d.results?.albummatches?.album || [];
+    if(artistQ) results = results.filter(a => a.artist.toLowerCase().includes(artistQ.toLowerCase()));
+
+    if(!results.length){
+      document.getElementById('search-results').innerHTML = '<div class="search-empty">Nenhum álbum encontrado.</div>';
+      return;
+    }
+
+    document.getElementById('search-results').innerHTML = results.map(a => {
+      const img = LastFmService.getBestImage(a.image) || '';
+      return `<div class="search-result-item" onclick="loadSearchResult('${x(a.name)}','${x(a.artist)}')">
+        <img class="search-result-img" src="${x(img)}" onerror="this.style.display='none'" alt="">
+        <div class="search-result-info">
+          <div class="search-result-title">${x(a.name)}</div>
+          <div class="search-result-artist">${x(a.artist)}</div>
+        </div>
+        <span style="font-size:.6rem;color:var(--info);letter-spacing:.06em;flex-shrink:0">▶ Girar</span>
+      </div>`;
+    }).join('');
+  } catch(e){
+    document.getElementById('search-results').innerHTML = '<div class="search-empty">Erro na busca. Tente novamente.</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Buscar';
+  }
+}
+
+async function loadSearchResult(albumName, artistName){
+  // Clear search UI
+  document.getElementById('search-results').innerHTML = '<div class="search-empty">Carregando…</div>';
+  document.getElementById('search-go-btn').disabled = true;
+
+  showLoad(true); hideRes();
+  try {
+    const mbData = await MusicBrainzService.searchRelease(albumName, artistName);
+    const spData = await SpotifyService.resolveAlbum(albumName, artistName);
+    let tracks = [];
+    if(spData?.spotifyId) tracks = await SpotifyService.getTracklist(spData.spotifyId);
+    if(!tracks.length && mbData?.mbid) tracks = await MusicBrainzService.getTracklist(mbData.mbid);
+    const totalMin = tracks.length ? Math.round(tracks.reduce((s,t)=>s+(t.ms||0),0)/60000) : 0;
+
+    // Get album info from Last.fm for popularity + tags
+    const lfmInfo = await LastFmService.getAlbumInfo(artistName, albumName);
+    const popularity = parseInt(lfmInfo?.listeners || lfmInfo?.playcount || 0);
+    const genres = (lfmInfo?.tags?.tag || []).map(t=>t.name).slice(0,3);
+    const lastfmUrl = lfmInfo?.url || '';
+    const image = spData?.image || (lfmInfo?.image ? LastFmService.getBestImage(lfmInfo.image) : '') || '';
+
+    const album = {
+      id: spData?.spotifyId || mbData?.mbid || 'search_'+btoa(encodeURIComponent(artistName+albumName)).substring(0,20),
+      name: albumName, artist: artistName,
+      year: mbData?.date?.substring(0,4) || '?',
+      type: 'album',
+      tracks: tracks.length ? tracks : [{n:1,name:'Tracklist indisponível',ms:0}],
+      totalTracks: tracks.length, durationMin: totalMin, image, genres,
+      popularity, url: spData?.url || '', lastfmUrl,
+      label: mbData?.label || '', country: mbData?.country || '', mbid: mbData?.mbid || '',
+      _sources:{lastfm:true, mb:!!mbData, spotify:!!(spData?.image||spData?.url)}
+    };
+
+    curAlbum = album; spins++;
+    document.getElementById('stat-spins').textContent = spins;
+    DBService.addAlbum(album);
+    checkBadges(true);
+    renderCard(album);
+    document.getElementById('result-section').style.display = 'block';
+    document.getElementById('result-section').scrollIntoView({behavior:'smooth',block:'start'});
+    document.getElementById('search-results').innerHTML = '';
+  } catch(e){
+    showErr('Erro ao carregar álbum.<br><small>'+e.message+'</small>');
+  } finally {
+    showLoad(false);
+    document.getElementById('search-go-btn').disabled = false;
+  }
+}
+
+// ══════════════════════
+//  ARTISTAS SIMILARES
+// ══════════════════════
+async function loadSimilarArtists(artistName){
+  const wrap = document.getElementById('similar-artists-wrap');
+  if(!wrap) return;
+  wrap.innerHTML = '<span class="similar-loading">Buscando artistas similares…</span>';
+
+  try {
+    const url = `${LASTFM_BASE}/?method=artist.getSimilar&artist=${encodeURIComponent(artistName)}&api_key=${LASTFM_API_KEY}&format=json&limit=8`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const similar = d.similarartists?.artist || [];
+
+    if(!similar.length){
+      wrap.innerHTML = '<span class="similar-loading" style="opacity:.5">Nenhum artista similar encontrado.</span>';
+      return;
+    }
+
+    wrap.innerHTML = similar.slice(0,5).map(a =>
+      `<button class="similar-artist-btn" onclick="spinBySpecificArtist('${x(a.name)}')">
+        <span class="sim-icon">⟳</span>${x(a.name)}
+      </button>`
+    ).join('');
+  } catch(e){
+    wrap.innerHTML = '<span class="similar-loading" style="opacity:.5">—</span>';
+  }
+}
+
+// ══════════════════════
+//  MODO ARTISTA
+// ══════════════════════
+let artistPanelOpen = false;
+function toggleArtistPanel(){
+  artistPanelOpen = !artistPanelOpen;
+  document.getElementById('artist-mode-panel').classList.toggle('open', artistPanelOpen);
+  document.getElementById('artist-btn').classList.toggle('active', artistPanelOpen);
+  if(artistPanelOpen) document.getElementById('artist-name-input').focus();
+  if(artistPanelOpen && searchPanelOpen) toggleSearchPanel();
+}
+
+async function spinByArtist(){
+  const name = document.getElementById('artist-name-input').value.trim();
+  if(!name) { document.getElementById('artist-name-input').focus(); return; }
+  await spinBySpecificArtist(name);
+}
+
+async function spinBySpecificArtist(artistName){
+  document.getElementById('artist-spin-btn').disabled = true;
+  showLoad(true); hideRes();
+  document.getElementById('refine-section').style.display = 'none';
+
+  try {
+    const albums = await LastFmService.getArtistAlbums(artistName);
+    if(!albums.length) { showErr(`Nenhum álbum encontrado para "${x(artistName)}".`); return; }
+
+    // Filter out already listened
+    const h = DBService.getHistory();
+    const listenedNames = h.filter(a=>a.listened).map(a=>a.name.toLowerCase());
+    let pool = shuffle(albums.filter(a => !listenedNames.includes(a.name.toLowerCase())));
+    if(!pool.length) pool = shuffle(albums); // all listened? show anyway
+
+    // Try to build a full album object
+    let album = null;
+    for(let i = 0; i < Math.min(pool.length, 5); i++){
+      const candidate = pool[i];
+      if(!candidate.name || candidate.name==='(null)') continue;
+      const mbData = await MusicBrainzService.searchRelease(candidate.name, artistName);
+      const spData = await SpotifyService.resolveAlbum(candidate.name, artistName);
+      let tracks = [];
+      if(spData?.spotifyId) tracks = await SpotifyService.getTracklist(spData.spotifyId);
+      if(!tracks.length && mbData?.mbid) tracks = await MusicBrainzService.getTracklist(mbData.mbid);
+      const totalMin = tracks.length ? Math.round(tracks.reduce((s,t)=>s+(t.ms||0),0)/60000) : 0;
+      const image = spData?.image || LastFmService.getBestImage(candidate.image) || '';
+
+      album = {
+        id: spData?.spotifyId || mbData?.mbid || lfmId(candidate),
+        name: candidate.name, artist: artistName,
+        year: mbData?.date?.substring(0,4) || '?',
+        type: 'album',
+        tracks: tracks.length ? tracks : [{n:1,name:'Tracklist indisponível',ms:0}],
+        totalTracks: tracks.length, durationMin: totalMin, image,
+        genres: (candidate.tags?.tag||[]).map(t=>t.name).slice(0,3),
+        popularity: parseInt(candidate.playcount||0),
+        url: spData?.url||candidate.url||'', lastfmUrl: candidate.url||'',
+        label: mbData?.label||'', country: mbData?.country||'', mbid: mbData?.mbid||'',
+        _sources:{lastfm:true, mb:!!mbData, spotify:!!(spData?.image||spData?.url)},
+        _artistMode: artistName
+      };
+      break;
+    }
+
+    if(!album){ showErr(`Não foi possível montar um álbum completo de "${x(artistName)}".`); return; }
+    curAlbum = album; spins++;
+    document.getElementById('stat-spins').textContent = spins;
+    DBService.addAlbum(album);
+    checkBadges(true);
+    renderCard(album);
+    document.getElementById('result-section').style.display = 'block';
+    document.getElementById('result-section').scrollIntoView({behavior:'smooth',block:'start'});
+  } catch(e){
+    console.error(e);
+    showErr('Erro no modo artista.<br><small>'+e.message+'</small>');
+  } finally {
+    showLoad(false);
+    document.getElementById('artist-spin-btn').disabled = false;
+  }
+}
+
+// ══════════════════════
+//  WISHLIST
+// ══════════════════════
+const WishlistService = {
+  KEY: 'spinrec4_wish',
+  get(){ try{return JSON.parse(localStorage.getItem(this.KEY)||'[]')}catch{return[]} },
+  save(w){ localStorage.setItem(this.KEY, JSON.stringify(w)) },
+  add(a){
+    let w = this.get();
+    if(!w.find(x=>x.id===a.id)) w.unshift({...a, _wishTs: Date.now()});
+    this.save(w); syncWishlistCount();
+  },
+  remove(id){
+    let w = this.get().filter(a=>a.id!==id);
+    this.save(w); syncWishlistCount();
+    if(wishOpen) renderWishlist();
+  },
+  has(id){ return !!this.get().find(a=>a.id===id); },
+  clear(){ if(!confirm('Limpar wishlist?'))return; localStorage.removeItem(this.KEY); syncWishlistCount(); renderWishlist(); }
+};
+
+let wishOpen = false;
+function toggleWishlist(){
+  wishOpen = !wishOpen;
+  document.getElementById('wishlist-section').classList.toggle('open', wishOpen);
+  document.getElementById('wishlist-btn').classList.toggle('active', wishOpen);
+  if(wishOpen) renderWishlist();
+}
+
+function syncWishlistCount(){
+  const n = WishlistService.get().length;
+  document.getElementById('wishlist-count').textContent = n ? n+' álbuns' : '';
+}
+
+function renderWishlist(){
+  const g = document.getElementById('wishlist-grid');
+  const w = WishlistService.get();
+  if(!w.length){
+    g.innerHTML = '<div class="empty-state">Nenhum álbum na wishlist ainda.<br><small style="font-size:.62rem;color:var(--muted)">Use o botão 🔖 nos cards para salvar pra depois.</small></div>';
+    return;
+  }
+  g.innerHTML = w.map(a=>`
+<div class="wishlist-item" onclick="loadAlbumFromHistory('${a.id}')">
+  <span class="wishlist-badge">🔖</span>
+  <button class="wishlist-remove" onclick="event.stopPropagation();WishlistService.remove('${a.id}')" title="Remover">×</button>
+  <img src="${x(a.image||'')}" alt="${x(a.name)}" loading="lazy" onerror="this.style.display='none'">
+  <div class="wishlist-meta">
+    <div class="wishlist-title">${x(a.name)}</div>
+    <div class="wishlist-artist">${x(a.artist)}</div>
+  </div>
+</div>`).join('');
+}
+
+function clearWishlist(){ WishlistService.clear(); }
+
+// ══════════════════════
+//  COMPARTILHAR CARD
+// ══════════════════════
+function openShareModal(album){
+  if(!album) return;
+  const o = calcObscurityScore(album.popularity);
+  const h = DBService.getHistory();
+  const e = h.find(a=>a.id===album.id)||{};
+  const rating = e.rating||0;
+  const ratingStr = rating ? `${rating.toFixed(1)}/5 ⭐` : '';
+
+  document.getElementById('share-preview').innerHTML = `
+<div class="scp-top">
+  <img class="scp-img" src="${x(album.image||'')}" onerror="this.style.display='none'" alt="">
+  <div class="scp-info">
+    <div class="scp-title">${x(album.name)}</div>
+    <div class="scp-artist">${x(album.artist)}</div>
+    <div class="scp-year">${album.year}${album.durationMin?' · '+album.durationMin+' min':''}</div>
+  </div>
+</div>
+<div class="scp-badge-row">
+  <span class="scp-obscurity">${o.label}</span>
+  ${ratingStr?`<span class="scp-rating">${ratingStr}</span>`:''}
+</div>
+<div class="scp-brand">SPINREC — spinrec.app</div>`;
+
+  // Show native share button if supported
+  if(navigator.share) document.getElementById('share-native-btn').style.display='';
+
+  document.getElementById('share-modal').classList.add('open');
+}
+
+function closeShareModal(){
+  document.getElementById('share-modal').classList.remove('open');
+}
+
+function buildShareText(album){
+  if(!album) return '';
+  const o = calcObscurityScore(album.popularity);
+  const h = DBService.getHistory();
+  const e = h.find(a=>a.id===album.id)||{};
+  const rating = e.rating ? ` · ${e.rating.toFixed(1)}/5 ⭐` : '';
+  const url = album.url || album.lastfmUrl || '';
+  return `🎵 ${album.name} — ${album.artist} (${album.year})\n${o.label}${rating}\n\nDescoberto via SPINREC${url?'\n'+url:''}`;
+}
+
+function copyShareText(){
+  if(!curAlbum) return;
+  const text = buildShareText(curAlbum);
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn = document.getElementById('share-copy-btn');
+    btn.textContent = '✓ Copiado!';
+    btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent = '📋 Copiar texto'; btn.classList.remove('copied'); }, 2200);
+  }).catch(()=> alert(text));
+}
+
+function shareTweet(){
+  if(!curAlbum) return;
+  const text = buildShareText(curAlbum);
+  window.open('https://twitter.com/intent/tweet?text='+encodeURIComponent(text), '_blank', 'noopener');
+}
+
+async function shareNative(){
+  if(!curAlbum || !navigator.share) return;
+  try {
+    await navigator.share({ title: curAlbum.name+' — '+curAlbum.artist, text: buildShareText(curAlbum), url: curAlbum.url||curAlbum.lastfmUrl||'' });
+  } catch(e){ /* cancelled */ }
+}
+
+document.getElementById('share-modal').addEventListener('click', function(e){
+  if(e.target===this) closeShareModal();
+});
+
+// ══════════════════════
+//  GRÁFICOS DA COLEÇÃO
+// ══════════════════════
+function renderCollectionCharts(){
+  const h = DBService.getHistory();
+  const listened = h.filter(a=>a.listened);
+  const chartsEl = document.getElementById('collection-charts');
+  if(!chartsEl) return;
+
+  if(!listened.length){
+    chartsEl.innerHTML = '<div class="chart-empty" style="grid-column:1/-1">Marque álbuns como escutados para ver seus gráficos.</div>';
+    return;
+  }
+
+  // Gêneros top 6
+  const genreMap = {};
+  listened.forEach(a=>(a.genres||[]).forEach(g=>{ genreMap[g]=(genreMap[g]||0)+1; }));
+  const topGenres = Object.entries(genreMap).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const maxG = topGenres[0]?.[1] || 1;
+
+  // Décadas
+  const decadeMap = {};
+  listened.forEach(a=>{
+    if(!a.year||a.year==='?') return;
+    const d = Math.floor(parseInt(a.year)/10)*10;
+    decadeMap[d] = (decadeMap[d]||0)+1;
+  });
+  const decades = Object.entries(decadeMap).sort((a,b)=>+a[0]-+b[0]);
+  const maxD = Math.max(...decades.map(d=>d[1]), 1);
+
+  // Obscuridade
+  const obscLevels = {mainstream:0,cult:0,obscure:0,ultra:0};
+  listened.forEach(a=>{ const o=calcObscurityScore(parseInt(a.popularity||0)); obscLevels[o.level]++; });
+  const maxO = Math.max(...Object.values(obscLevels), 1);
+  const obscLabels = {mainstream:'Mainstream',cult:'Cult',obscure:'Obscuro',ultra:'Ultra Obscuro'};
+  const obscColors = {mainstream:'#1DB954',cult:'var(--accent)',obscure:'#e67e22',ultra:'#e74c3c'};
+
+  chartsEl.innerHTML = `
+<div class="chart-card">
+  <div class="chart-card-title">Top Gêneros</div>
+  ${topGenres.length ? topGenres.map(([g,n])=>`
+    <div class="chart-bar-row">
+      <div class="chart-bar-label">${x(g)}</div>
+      <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${Math.round(n/maxG*100)}%"></div></div>
+      <div class="chart-bar-val">${n}</div>
+    </div>
+  `).join('') : '<div class="chart-empty">Sem dados</div>'}
+</div>
+
+<div class="chart-card">
+  <div class="chart-card-title">Por Década</div>
+  ${decades.length ? `<div class="chart-decade-row">
+    ${decades.map(([dec,n])=>`
+      <div class="chart-decade-col">
+        <div class="chart-decade-bar" style="height:${Math.round(n/maxD*68)+4}px" title="${n} álbuns"></div>
+        <div class="chart-decade-lbl">'${String(dec).slice(2)}</div>
+      </div>
+    `).join('')}
+  </div>
+  <div style="font-size:.6rem;color:var(--muted);text-align:center;letter-spacing:.03em;">${listened.filter(a=>a.year&&a.year!=='?').length} álbuns com data</div>`
+  : '<div class="chart-empty">Sem dados</div>'}
+</div>
+
+<div class="chart-card">
+  <div class="chart-card-title">Perfil de Obscuridade</div>
+  ${Object.entries(obscLevels).filter(([,n])=>n>0).map(([lvl,n])=>`
+    <div class="chart-bar-row">
+      <div class="chart-bar-label" style="color:${obscColors[lvl]}">${obscLabels[lvl]}</div>
+      <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${Math.round(n/maxO*100)}%;background:${obscColors[lvl]}"></div></div>
+      <div class="chart-bar-val">${n}</div>
+    </div>
+  `).join('') || '<div class="chart-empty">Sem dados</div>'}
+</div>
+
+<div class="chart-card">
+  <div class="chart-card-title">Países Explorados</div>
+  ${(()=>{
+    const cm={};
+    listened.filter(a=>a.country).forEach(a=>{ cm[a.country]=(cm[a.country]||0)+1; });
+    const top = Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    const maxC = top[0]?.[1]||1;
+    return top.length ? top.map(([c,n])=>`
+      <div class="chart-bar-row">
+        <div class="chart-bar-label">${x(c)}</div>
+        <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${Math.round(n/maxC*100)}%;background:var(--mb)"></div></div>
+        <div class="chart-bar-val">${n}</div>
+      </div>
+    `).join('') : '<div class="chart-empty">Sem dados de país</div>';
+  })()}
+</div>`;
+
+  // Animate bars after paint
+  requestAnimationFrame(()=>{
+    document.querySelectorAll('.chart-bar-fill').forEach(el=>{
+      el.style.transition='width .7s ease';
+    });
+  });
+}
+
+// ══════════════════════
+//  PWA
+// ══════════════════════
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', e=>{
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if(!localStorage.getItem('pwa_dismissed')){
+    setTimeout(()=>document.getElementById('pwa-banner').classList.add('visible'), 3000);
+  }
+});
+
+async function installPWA(){
+  if(!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const {outcome} = await deferredInstallPrompt.userChoice;
+  if(outcome==='accepted'){
+    document.getElementById('pwa-banner').classList.remove('visible');
+    deferredInstallPrompt = null;
+  }
+}
+
+function dismissPWA(){
+  document.getElementById('pwa-banner').classList.remove('visible');
+  localStorage.setItem('pwa_dismissed','1');
+}
+
+window.addEventListener('appinstalled', ()=>{
+  document.getElementById('pwa-banner').classList.remove('visible');
+});
+
+// Register service worker
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+</script>
 // ║                SPINREC — CAMADA DE SERVIÇOS                  ║
 // ╠══════════════════════════════════════════════════════════════╣
 // ║  1. LastFmService   → descoberta por tag sem OAuth           ║
@@ -1199,6 +1886,9 @@ function renderCollection(){
       </div>
     </div>`;
   }).join('');
+
+  // Render charts
+  renderCollectionCharts();
 }
 const GENRES=[
   {l:'🎲 Aleatório',q:''},
@@ -1479,6 +2169,11 @@ function renderCard(a, adventureMode){
         ${a.url?`<a class="btn btn-spotify" href="${x(a.url)}" target="_blank" rel="noopener">▶ Spotify</a>`:''}
         ${a.lastfmUrl?`<a class="btn btn-lastfm" href="${x(a.lastfmUrl)}" target="_blank" rel="noopener">◉ Last.fm</a>`:''}
         <button class="btn btn-again" onclick="spin()">⟳ Outro álbum</button>
+        ${a._artistMode ? `<button class="btn" style="border-color:#9b59b6;color:#9b59b6" onclick="spinBySpecificArtist('${x(a.artist)}')">⟳ Mais de ${x(a.artist)}</button>` : ''}
+        <button class="btn btn-wishlist${WishlistService.has(a.id)?' in-wishlist':''}" id="bw-${a.id}" onclick="togWish('${a.id}',this)">
+          ${WishlistService.has(a.id)?'🔖 Na wishlist':'🔖 Quero ouvir'}
+        </button>
+        <button class="btn btn-share" onclick="openShareModal(curAlbum)">↗ Compartilhar</button>
       </div>
       <div class="note-section">
         <div class="note-label">Nota pessoal</div>
@@ -1494,12 +2189,19 @@ function renderCard(a, adventureMode){
           ${a.tracks.map(t=>`<div class="track-row"><span class="track-num">${t.n}</span><span class="track-name">${x(t.name)}</span><span class="track-dur">${fmt(t.ms)}</span></div>`).join('')}
         </div>
       </div>
+      <div class="similar-section">
+        <div class="similar-label">Artistas similares</div>
+        <div class="similar-artists" id="similar-artists-wrap"><span class="similar-loading">—</span></div>
+      </div>
     </div>
   </div>
 </div>`;
 
   // Show refine section
   document.getElementById('refine-section').style.display='block';
+
+  // Load similar artists async
+  if(a.artist) loadSimilarArtists(a.artist);
 }
 
 // ═══════════════════════════════════════
@@ -1526,6 +2228,18 @@ function togLis(id,btn){const h=DBService.getHistory();const e=h.find(a=>a.id===
 function togTL(btn){const l=btn.nextElementSibling;l.classList.toggle('open');const o=l.classList.contains('open');btn.querySelector('.tl-arrow').textContent=o?'▼':'▶';btn.childNodes[1].textContent=o?' Ocultar tracklist':' Ver tracklist'}
 
 function togFav(id,btn){const h=DBService.getHistory();const e=h.find(a=>a.id===id);const nv=e?!e.favorite:true;DBService.setFavorite(id,nv);btn.textContent=nv?'★ Favorito':'☆ Favoritar';btn.classList.toggle('active',nv);if(histOpen)renderHist()}
+function togWish(id,btn){
+  const inWish = WishlistService.has(id);
+  if(inWish){
+    WishlistService.remove(id);
+    btn.textContent='🔖 Quero ouvir';btn.classList.remove('in-wishlist');
+  } else {
+    const a = curAlbum||(DBService.getHistory().find(x=>x.id===id));
+    if(a) WishlistService.add(a);
+    btn.textContent='🔖 Na wishlist';btn.classList.add('in-wishlist');
+  }
+  if(wishOpen) renderWishlist();
+}
 function saveNote(id){const el=document.getElementById('note-'+id);if(!el)return;DBService.setNote(id,el.value);const ns=document.getElementById('ns-'+id);if(ns){ns.classList.add('show');setTimeout(()=>ns.classList.remove('show'),1800)}}
 
 // ═══════════════════════════════════════
@@ -1838,7 +2552,7 @@ function clearHist(){DBService.clear()}
 //  BOOT
 // ═══════════════════════════════════════
 (async function boot(){
-  buildGenres();buildCountries();syncStats();
+  buildGenres();buildCountries();syncStats();syncWishlistCount();
   prevEarnedBadges = checkBadges(false);
   setPill('db',true); // DB local sempre ativo
   document.getElementById('spin-btn').disabled=false; // funciona sem Spotify
