@@ -439,20 +439,24 @@ async function fetchAlbum(){
   // 1. Busca artistas do genero
   const off=Math.floor(Math.random()*20)*LIMIT;
   const ar=await spFetch(`/search?q=${encodeURIComponent(genreQ)}&type=artist&limit=${LIMIT}&offset=${off}&market=BR`);
+  console.log('[fetchAlbum] artistas encontrados:', (ar.artists||{}).items?.length, ar);
   const artists=(ar.artists||{}).items?.filter(Boolean)||[];
-  if(!artists.length) return null;
+  if(!artists.length){ console.warn('[fetchAlbum] nenhum artista, retornando null'); return null; }
 
   // 2. Pega albuns de artistas aleatorios do resultado
   let items=[];
   const typeQ=F.type?`&include_groups=${F.type}`:'&include_groups=album,single';
   const picked=[];
   for(let i=0;i<Math.min(4,artists.length);i++) picked.push(rnd(artists));
+  console.log('[fetchAlbum] artistas escolhidos:', picked.map(a=>a.name));
   for(const artist of picked){
     try{
       const alb=await spFetch(`/artists/${artist.id}/albums?limit=10&market=BR${typeQ}`);
+      console.log('[fetchAlbum] albums de', artist.name, ':', alb.items?.length, alb);
       items=items.concat((alb.items||[]).filter(Boolean));
-    }catch(_){}
+    }catch(e){ console.error('[fetchAlbum] erro albums de', artist.name, e); }
   }
+  console.log('[fetchAlbum] total items antes dos filtros:', items.length);
 
   // Deduplica, filtra epoca e preferencias
   items=[...new Map(items.map(i=>[i.id,i])).values()];
