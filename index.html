@@ -1,0 +1,2582 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="description" content="SPINREC — Descubra álbuns via Last.fm, MusicBrainz e Spotify">
+<link rel="manifest" href="manifest.json">
+<title>SPINREC — Descubra Álbuns</title>
+<!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║                   SPINREC — ARQUITETURA                      ║
+  ╠══════════════════════════════════════════════════════════════╣
+  ║  Descoberta musical  →  Last.fm API (getTopAlbums / search)  ║
+  ║  Metadados extras    →  MusicBrainz API (release-groups)     ║
+  ║  Capas + links       →  Spotify Web API (PKCE OAuth)         ║
+  ║  Banco próprio       →  localStorage → migrar p/ Supabase    ║
+  ║  Frontend            →  HTML/JS agora → Next.js / React      ║
+  ║  Deploy              →  GitHub Pages agora → Vercel          ║
+  ╚══════════════════════════════════════════════════════════════╝
+
+  FLUXO DE DADOS:
+  1. Last.fm  → descobre álbuns pelo gênero/tag (sem OAuth)
+  2. MusicBrainz → enriquece com metadados (label, country, tags)
+  3. Spotify  → resolve capa em alta resolução + link de escuta
+  4. Supabase (futuro) → persiste histórico, ratings, syncs cross-device
+
+  VARIÁVEIS DE AMBIENTE (ao migrar para Next.js):
+    NEXT_PUBLIC_SPOTIFY_CLIENT_ID
+    LASTFM_API_KEY           (server-side)
+    SUPABASE_URL
+    SUPABASE_ANON_KEY
+-->
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0d0d0d;--surface:#141414;--surface2:#1c1c1c;--border:#2a2a2a;
+  --accent:#e8c84a;--accent2:#e85a4a;--text:#f0ece0;--muted:#6a6560;
+  --success:#4ae89a;--info:#7dcfff;--lastfm:#d51007;--mb:#ba478f;
+}
+*{box-sizing:border-box;margin:0;padding:0}html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:'DM Mono',monospace;min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:.032;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");background-size:160px}
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+header{border-bottom:1px solid var(--border);padding:0 clamp(16px,4vw,60px);display:flex;align-items:center;justify-content:space-between;height:64px;position:sticky;top:0;background:rgba(13,13,13,.93);backdrop-filter:blur(14px);z-index:200}
+.logo{font-family:'Bebas Neue',sans-serif;font-size:2rem;letter-spacing:.12em;color:var(--accent);line-height:1;user-select:none}
+.logo span{color:var(--text)}
+.header-right{display:flex;align-items:center;gap:16px}
+.header-badge{font-size:.68rem;color:var(--muted);letter-spacing:.08em}
+.header-btn{background:none;border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.68rem;letter-spacing:.09em;padding:6px 14px;cursor:pointer;transition:border-color .2s,color .2s;text-transform:uppercase}
+.header-btn:hover,.header-btn.active{border-color:var(--accent);color:var(--accent)}
+
+/* SOURCE PILLS */
+.source-bar{padding:8px clamp(16px,4vw,60px);display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);background:var(--surface);overflow-x:auto}
+.source-pill{display:flex;align-items:center;gap:5px;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;padding:3px 9px;border:1px solid var(--border);color:var(--muted);white-space:nowrap;transition:all .2s}
+.source-pill.active{color:#000}
+.source-pill.lastfm{border-color:var(--lastfm);color:var(--lastfm)}
+.source-pill.lastfm.active{background:var(--lastfm);color:#fff}
+.source-pill.mb{border-color:var(--mb);color:var(--mb)}
+.source-pill.mb.active{background:var(--mb);color:#fff}
+.source-pill.spotify{border-color:#1DB954;color:#1DB954}
+.source-pill.spotify.active{background:#1DB954;color:#000}
+.source-pill.db{border-color:var(--info);color:var(--info)}
+.source-pill.db.active{background:var(--info);color:#000}
+.source-dot{width:6px;height:6px;border-radius:50%;background:currentColor;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.source-sep{color:var(--border);font-size:.7rem;flex-shrink:0}
+
+/* AUTH BANNER */
+#auth-banner{padding:14px clamp(16px,4vw,60px);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border);background:var(--surface);transition:all .3s}
+#auth-banner.connected{background:transparent;border-bottom-color:transparent}
+#auth-banner p{font-size:.75rem;color:var(--muted);letter-spacing:.04em;line-height:1.6}
+#auth-banner p strong{color:var(--accent)}
+#auth-banner.connected p{color:var(--success)}
+.auth-btn{font-family:'Bebas Neue',sans-serif;font-size:1.05rem;letter-spacing:.14em;padding:10px 22px;cursor:pointer;border:none;transition:all .14s;white-space:nowrap;flex-shrink:0}
+.auth-btn.login{background:var(--accent);color:#000}
+.auth-btn.login:hover{background:#f0d050}
+.auth-btn.logout{background:none;border:1px solid var(--accent2);color:var(--accent2);font-family:'DM Mono',monospace;font-size:.72rem;letter-spacing:.08em;padding:8px 16px}
+.auth-btn.logout:hover{background:var(--accent2);color:#fff}
+.auth-note{font-size:.62rem;color:var(--muted);letter-spacing:.04em;margin-top:4px}
+.auth-note span{color:var(--success)}
+
+/* HERO */
+.hero{padding:clamp(32px,7vw,90px) clamp(16px,4vw,60px) 0;display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start;max-width:1400px;margin:0 auto}
+@media(max-width:800px){.hero{grid-template-columns:1fr}}
+.hero-text h1{font-family:'DM Serif Display',serif;font-size:clamp(2.2rem,5vw,4.2rem);line-height:1.08;font-weight:400;margin-bottom:14px}
+.hero-text h1 em{font-style:italic;color:var(--accent)}
+.hero-text p{font-size:.8rem;color:var(--muted);line-height:1.8;max-width:360px;letter-spacing:.02em}
+.stat-row{display:flex;gap:28px;margin-top:28px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column;gap:3px}
+.stat-num{font-family:'Bebas Neue',sans-serif;font-size:1.9rem;color:var(--accent);line-height:1}
+.stat-label{font-size:.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:.11em}
+
+/* ARCH NOTE */
+.arch-note{margin-top:20px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);padding:12px 16px;font-size:.65rem;color:var(--muted);line-height:1.7;letter-spacing:.03em}
+.arch-note strong{color:var(--text);letter-spacing:.08em}
+
+/* FILTERS */
+.filters-panel{background:var(--surface);border:1px solid var(--border);padding:26px;display:flex;flex-direction:column;gap:20px;position:relative}
+.filters-panel::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--lastfm),var(--mb),#1DB954)}
+.filter-group label{display:block;font-size:.62rem;text-transform:uppercase;letter-spacing:.13em;color:var(--muted);margin-bottom:9px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--border);background:none;color:var(--muted);font-family:'DM Mono',monospace;font-size:.68rem;padding:5px 10px;cursor:pointer;letter-spacing:.04em;transition:all .14s;white-space:nowrap}
+.chip:hover{border-color:var(--accent);color:var(--text)}
+.chip.active{border-color:var(--accent);background:var(--accent);color:#000;font-weight:500}
+.genre-search{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.72rem;padding:7px 12px;outline:none;letter-spacing:.04em;transition:border-color .15s;margin-bottom:8px}
+.genre-search:focus{border-color:var(--accent)}
+.genre-search::placeholder{color:var(--muted)}
+.spin-btn{width:100%;background:var(--accent);border:none;color:#000;font-family:'Bebas Neue',sans-serif;font-size:1.4rem;letter-spacing:.16em;padding:16px;cursor:pointer;transition:background .14s,transform .1s;position:relative;overflow:hidden}
+.spin-btn:hover:not(:disabled){background:#f0d050}
+.spin-btn:active:not(:disabled){transform:scale(.98)}
+.spin-btn::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,transparent 40%,rgba(255,255,255,.16) 50%,transparent 60%);transform:translateX(-100%);transition:transform .45s}
+.spin-btn:hover:not(:disabled)::before{transform:translateX(100%)}
+.spin-btn:disabled{opacity:.45;cursor:not-allowed}
+.spin-btn-note{font-size:.6rem;color:var(--muted);text-align:center;margin-top:6px;letter-spacing:.04em}
+.spin-btn-note span{color:var(--lastfm)}
+
+/* MAIN */
+.main{max-width:1400px;margin:0 auto;padding:clamp(36px,6vw,72px) clamp(16px,4vw,60px)}
+.section-label{font-size:.62rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-bottom:18px;display:flex;align-items:center;gap:12px}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* DATA SOURCES BADGE */
+.data-sources{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.ds-badge{font-size:.58rem;padding:2px 7px;letter-spacing:.08em;text-transform:uppercase;border:1px solid;opacity:.8}
+.ds-badge.lastfm{border-color:var(--lastfm);color:var(--lastfm)}
+.ds-badge.mb{border-color:var(--mb);color:var(--mb)}
+.ds-badge.spotify{border-color:#1DB954;color:#1DB954}
+
+/* ALBUM CARD */
+#result-section{display:none}
+@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+.album-card{display:grid;grid-template-columns:auto 1fr;gap:30px;background:var(--surface);border:1px solid var(--border);padding:26px;position:relative;overflow:hidden;animation:fadeUp .4s ease both}
+.album-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--lastfm),var(--mb),#1DB954)}
+@media(max-width:600px){.album-card{grid-template-columns:1fr}}
+.cover-wrap{position:relative;width:clamp(130px,16vw,210px);flex-shrink:0}
+.cover-wrap img{width:100%;aspect-ratio:1;object-fit:cover;display:block;filter:saturate(.88);transition:filter .3s}
+.cover-wrap:hover img{filter:saturate(1.05)}
+.vinyl-shadow{position:absolute;top:8%;right:-18%;width:84%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,#222 30%,#111 70%,#000 100%);z-index:-1;opacity:.7;transition:right .3s}
+.album-card:hover .vinyl-shadow{right:-22%}
+.type-badge{position:absolute;top:8px;left:8px;background:#000;border:1px solid var(--accent);color:var(--accent);font-size:.58rem;padding:3px 7px;letter-spacing:.1em;text-transform:uppercase}
+.album-info{display:flex;flex-direction:column;justify-content:space-between;min-height:140px}
+.album-info-top{display:flex;flex-direction:column;gap:5px}
+.album-genre{font-size:.62rem;text-transform:uppercase;letter-spacing:.15em;color:var(--accent)}
+.album-title{font-family:'DM Serif Display',serif;font-size:clamp(1.5rem,3.2vw,2.6rem);font-weight:400;line-height:1.1}
+.album-artist{font-size:.86rem;color:var(--muted);letter-spacing:.04em}
+.album-meta{display:flex;gap:18px;font-size:.7rem;color:var(--muted);margin-top:10px;flex-wrap:wrap}
+.album-meta span{display:flex;align-items:center;gap:5px}
+.dot{width:4px;height:4px;background:var(--accent);border-radius:50%;flex-shrink:0}
+
+/* LASTFM EXTRAS */
+.lfm-stats{display:flex;gap:16px;margin-top:8px;flex-wrap:wrap}
+.lfm-stat{font-size:.65rem;color:var(--muted);display:flex;align-items:center;gap:5px}
+.lfm-stat strong{color:var(--lastfm)}
+.mb-info{font-size:.63rem;color:var(--muted);margin-top:6px;letter-spacing:.03em}
+.mb-info span{color:var(--mb)}
+
+/* STARS */
+.rating-section{margin-top:18px}
+.rating-label-text{font-size:.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
+.stars-container{display:flex;gap:2px;align-items:center}
+.star-unit{position:relative;width:28px;height:28px;cursor:pointer}
+.star-bg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--border);font-size:1.55rem;pointer-events:none}
+.star-left,.star-right{position:absolute;top:0;width:50%;height:100%;z-index:2}
+.star-left{left:0}.star-right{right:0}
+.star-fl,.star-fr{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.55rem;color:var(--accent);pointer-events:none;opacity:0;transition:opacity .1s}
+.star-fl{clip-path:inset(0 50% 0 0)}.star-fr{clip-path:inset(0 0 0 50%)}
+.star-unit.half .star-fl{opacity:1}
+.star-unit.full .star-fl,.star-unit.full .star-fr{opacity:1}
+.rating-val{font-family:'Bebas Neue',sans-serif;font-size:1.3rem;color:var(--accent);margin-left:10px;min-width:36px}
+
+/* ACTIONS */
+.album-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.btn{background:none;border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.7rem;padding:8px 14px;cursor:pointer;letter-spacing:.06em;text-transform:uppercase;transition:all .14s;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+.btn-listen{border-color:var(--success);color:var(--success)}
+.btn-listen:hover,.btn-listen.marked{background:#4ae89a22}
+.btn-spotify{border-color:#1DB954;color:#1DB954}
+.btn-spotify:hover{background:#1DB954;color:#000}
+.btn-lastfm{border-color:var(--lastfm);color:var(--lastfm)}
+.btn-lastfm:hover{background:var(--lastfm);color:#fff}
+.btn-again{border-color:var(--accent);color:var(--accent)}
+.btn-again:hover{background:var(--accent);color:#000}
+
+/* TRACKLIST */
+.tracklist-section{margin-top:24px;border-top:1px solid var(--border);padding-top:20px}
+.tl-toggle{background:none;border:none;color:var(--muted);font-family:'DM Mono',monospace;font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;padding:0;display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.tl-toggle:hover{color:var(--text)}
+.tl-arrow{transition:transform .2s;display:inline-block}
+.track-list{display:none}.track-list.open{display:block}
+.track-row{display:flex;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.72rem}
+.track-row:last-child{border-bottom:none}
+.track-num{color:var(--muted);width:22px;text-align:right;flex-shrink:0}
+.track-name{flex:1}.track-dur{color:var(--muted);flex-shrink:0}
+
+/* LOADING */
+.spinner{display:none;width:32px;height:32px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin:40px auto}
+.spinner.on{display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{text-align:center;color:var(--muted);font-size:.75rem;letter-spacing:.06em;display:none;margin-top:8px}
+.loading-text.on{display:block}
+.loading-steps{margin-top:10px;display:none;flex-direction:column;align-items:center;gap:4px}
+.loading-steps.on{display:flex}
+.ls{font-size:.62rem;letter-spacing:.06em;opacity:.5;transition:opacity .3s}
+.ls.active{opacity:1}
+.ls.done{opacity:.4;text-decoration:line-through}
+.ls-lastfm{color:var(--lastfm)}
+.ls-mb{color:var(--mb)}
+.ls-spotify{color:#1DB954}
+
+.notice{background:var(--surface);border:1px solid var(--border);padding:36px;text-align:center;color:var(--muted);font-size:.82rem;letter-spacing:.04em;line-height:1.8}
+.notice strong{color:var(--accent2)}
+hr.divider{border:none;border-top:1px solid var(--border);margin:48px 0}
+
+/* HISTORY */
+#history-section{display:none}
+#history-section.open{display:block;animation:fadeUp .3s ease both}
+.history-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.clear-btn{background:none;border:1px solid var(--accent2);color:var(--accent2);font-family:'DM Mono',monospace;font-size:.68rem;padding:5px 12px;cursor:pointer;letter-spacing:.08em;text-transform:uppercase;transition:all .14s}
+.clear-btn:hover{background:var(--accent2);color:#fff}
+.history-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:14px}
+.history-item{background:var(--surface);border:1px solid var(--border);cursor:pointer;transition:border-color .18s,transform .18s;position:relative;overflow:hidden}
+.history-item:hover{border-color:var(--accent);transform:translateY(-3px)}
+.history-item img{width:100%;aspect-ratio:1;object-fit:cover;display:block;filter:saturate(.8);transition:filter .2s}
+.history-item:hover img{filter:saturate(1)}
+.history-meta{padding:9px 10px}
+.history-title{font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}
+.history-artist{font-size:.62rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:6px}
+.history-stars-row{display:flex;align-items:center;gap:2px}
+.h-star{font-size:.8rem;color:var(--accent)}.h-star.empty{color:var(--border)}
+.listened-badge{position:absolute;top:6px;right:6px;background:var(--success);color:#000;font-size:.55rem;padding:2px 5px;letter-spacing:.06em;text-transform:uppercase}
+.empty-state{color:var(--muted);font-size:.78rem;padding:44px 0;text-align:center;letter-spacing:.06em;grid-column:1/-1}
+
+/* SUPABASE MIGRATION NOTE */
+.migration-note{position:fixed;bottom:16px;right:16px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--info);padding:10px 14px;font-size:.6rem;color:var(--muted);max-width:240px;z-index:100;letter-spacing:.03em;line-height:1.6}
+.migration-note strong{color:var(--info);display:block;margin-bottom:3px}
+.migration-note button{background:none;border:none;color:var(--border);cursor:pointer;float:right;font-size:.9rem;line-height:1;margin:-2px -4px 0 0}
+
+/* ═══════════════════════════════════════
+   REFINE SECTION — "Girar parecido"
+═══════════════════════════════════════ */
+#refine-section{display:none;margin-top:22px;animation:fadeUp .35s ease both}
+.refine-label{font-size:.6rem;text-transform:uppercase;letter-spacing:.16em;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.refine-label::before{content:'';flex:1;height:1px;background:var(--border)}
+.refine-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.refine-btns{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.refine-btn{background:none;border:1px solid var(--border);color:var(--muted);font-family:'DM Mono',monospace;font-size:.68rem;padding:7px 14px;cursor:pointer;letter-spacing:.06em;text-transform:uppercase;transition:all .18s;position:relative;overflow:hidden}
+.refine-btn::before{content:'';position:absolute;inset:0;opacity:0;transition:opacity .18s}
+.refine-btn:hover{color:var(--text);transform:translateY(-1px)}
+.refine-btn[data-dir="heavier"]{border-color:#c0392b}
+.refine-btn[data-dir="heavier"]:hover{background:#c0392b22;color:#e05040}
+.refine-btn[data-dir="experimental"]{border-color:#9b59b6}
+.refine-btn[data-dir="experimental"]:hover{background:#9b59b622;color:#bb79d6}
+.refine-btn[data-dir="calmer"]{border-color:#27ae60}
+.refine-btn[data-dir="calmer"]:hover{background:#27ae6022;color:#47ce80}
+.refine-btn[data-dir="darker"]{border-color:#2c3e50}
+.refine-btn[data-dir="darker"]:hover{background:#2c3e5044;color:#7f8c8d}
+.refine-btn[data-dir="popular"]{border-color:var(--accent)}
+.refine-btn[data-dir="popular"]:hover{background:#e8c84a22;color:var(--accent)}
+.refine-btn[data-dir="obscure"]{border-color:#e67e22}
+.refine-btn[data-dir="obscure"]:hover{background:#e67e2222;color:#e67e22}
+.refine-btn.spinning{opacity:.5;pointer-events:none}
+
+/* ═══════════════════════════════════════
+   ADVENTURE MODE
+═══════════════════════════════════════ */
+#adventure-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:500;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
+#adventure-modal.open{display:flex;animation:fadeUp .25s ease both}
+.adventure-box{background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--accent);padding:36px;max-width:480px;width:90%;position:relative}
+.adventure-box h2{font-family:'DM Serif Display',serif;font-size:1.8rem;font-weight:400;margin-bottom:6px}
+.adventure-box h2 em{color:var(--accent);font-style:italic}
+.adventure-box p{font-size:.72rem;color:var(--muted);margin-bottom:26px;line-height:1.7;letter-spacing:.02em}
+.adventure-close{position:absolute;top:14px;right:16px;background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;line-height:1}
+.adventure-close:hover{color:var(--text)}
+.adventure-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.adventure-opt{background:none;border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.72rem;padding:16px 14px;cursor:pointer;letter-spacing:.04em;text-align:left;transition:all .18s;display:flex;flex-direction:column;gap:5px}
+.adventure-opt:hover{border-color:var(--accent);background:var(--accent)0d}
+.adventure-opt .adv-icon{font-size:1.4rem;line-height:1}
+.adventure-opt .adv-title{font-size:.75rem;color:var(--text);font-weight:500;text-transform:uppercase;letter-spacing:.1em}
+.adventure-opt .adv-desc{font-size:.62rem;color:var(--muted);line-height:1.5;text-transform:none;letter-spacing:.02em}
+.adventure-opt[data-mode="challenge"]{border-color:#e74c3c}
+.adventure-opt[data-mode="challenge"]:hover{border-color:#e74c3c;background:#e74c3c11}
+.adventure-opt[data-mode="different"]{border-color:#3498db}
+.adventure-opt[data-mode="different"]:hover{border-color:#3498db;background:#3498db11}
+.adventure-opt[data-mode="cult"]{border-color:#9b59b6}
+.adventure-opt[data-mode="cult"]:hover{border-color:#9b59b6;background:#9b59b611}
+.adventure-opt[data-mode="classic"]{border-color:var(--accent)}
+.adventure-opt[data-mode="classic"]:hover{border-color:var(--accent);background:#e8c84a11}
+.adventure-opt[data-mode="underground"]{border-color:#e67e22}
+.adventure-opt[data-mode="underground"]:hover{border-color:#e67e22;background:#e67e2211}
+.adventure-opt[data-mode="random"]{border-color:var(--success)}
+.adventure-opt[data-mode="random"]:hover{border-color:var(--success);background:#4ae89a11}
+.adv-badge{display:inline-block;font-size:.55rem;padding:2px 6px;border:1px solid var(--accent);color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-top:2px;align-self:flex-start}
+
+/* ADVENTURE HEADER BTN */
+.btn-adventure{border-color:#9b59b6;color:#9b59b6}
+.btn-adventure:hover{background:#9b59b6;color:#fff}
+
+/* ═══════════════════════════════════════
+   HISTORY EXPANDED
+═══════════════════════════════════════ */
+.history-tabs{display:flex;gap:2px;margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:0}
+.htab{background:none;border:none;color:var(--muted);font-family:'DM Mono',monospace;font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;padding:7px 14px 9px;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;margin-bottom:-1px}
+.htab:hover{color:var(--text)}
+.htab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.fav-badge{position:absolute;bottom:6px;right:6px;background:var(--accent);color:#000;font-size:.58rem;padding:2px 5px;letter-spacing:.04em}
+
+/* History item note */
+.history-note-btn{background:none;border:none;color:var(--muted);font-size:.58rem;cursor:pointer;padding:0;letter-spacing:.04em;margin-top:3px;text-align:left;font-family:'DM Mono',monospace}
+.history-note-btn:hover{color:var(--accent)}
+.history-note-text{font-size:.6rem;color:var(--muted);font-style:italic;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:130px}
+
+/* NOTE WIDGET on card */
+.note-section{margin-top:14px;border-top:1px solid var(--border);padding-top:14px}
+.note-label{font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:6px}
+.note-input{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.7rem;padding:8px 10px;outline:none;resize:vertical;min-height:52px;letter-spacing:.02em;transition:border-color .15s}
+.note-input:focus{border-color:var(--accent)}
+.note-input::placeholder{color:var(--muted)}
+.note-save-btn{margin-top:6px;background:none;border:1px solid var(--border);color:var(--muted);font-family:'DM Mono',monospace;font-size:.62rem;padding:5px 12px;cursor:pointer;letter-spacing:.08em;text-transform:uppercase;transition:all .14s}
+.note-save-btn:hover{border-color:var(--accent);color:var(--accent)}
+.note-saved{color:var(--success);font-size:.62rem;letter-spacing:.06em;margin-left:8px;opacity:0;transition:opacity .3s}
+.note-saved.show{opacity:1}
+
+/* FAV BUTTON */
+.btn-fav{border-color:#e8c84a88}
+.btn-fav:hover,.btn-fav.active{background:#e8c84a22;border-color:var(--accent);color:var(--accent)}
+
+/* HISTORY SORT / FILTER */
+.history-controls{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.history-sort{background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.62rem;padding:4px 8px;cursor:pointer;outline:none;letter-spacing:.04em}
+.hist-count{font-size:.62rem;color:var(--muted);letter-spacing:.04em;margin-left:auto}
+
+/* ADVENTURE MODE INDICATOR on card */
+.adventure-indicator{display:inline-flex;align-items:center;gap:5px;font-size:.6rem;padding:3px 8px;border:1px solid #9b59b6;color:#9b59b6;letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px}
+
+/* ═══════════════════════════════════════
+   COUNTRY FILTER
+═══════════════════════════════════════ */
+.country-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:6px}
+.country-chip{border:1px solid var(--border);background:none;color:var(--muted);font-family:'DM Mono',monospace;font-size:.65rem;padding:6px 8px;cursor:pointer;letter-spacing:.03em;transition:all .14s;display:flex;align-items:center;gap:5px;text-align:left}
+.country-chip:hover{border-color:var(--accent);color:var(--text)}
+.country-chip.active{border-color:var(--accent);background:var(--accent)1a;color:var(--accent)}
+.country-flag{font-size:1rem;line-height:1;flex-shrink:0}
+
+/* ═══════════════════════════════════════
+   OBSCURITY SCORE
+═══════════════════════════════════════ */
+.obscurity-wrap{margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.obscurity-badge{display:inline-flex;align-items:center;gap:6px;font-size:.62rem;padding:4px 10px;border:1px solid;letter-spacing:.1em;text-transform:uppercase;font-weight:500}
+.obscurity-badge.mainstream{border-color:#1DB954;color:#1DB954}
+.obscurity-badge.cult{border-color:var(--accent);color:var(--accent)}
+.obscurity-badge.obscure{border-color:#e67e22;color:#e67e22}
+.obscurity-badge.ultra{border-color:#e74c3c;color:#e74c3c}
+.obscurity-bar{flex:1;min-width:80px;max-width:160px;height:3px;background:var(--border);position:relative;overflow:hidden}
+.obscurity-fill{height:100%;transition:width .5s ease}
+.obscurity-badge.mainstream + .obscurity-bar .obscurity-fill{background:#1DB954;width:20%}
+.obscurity-badge.cult + .obscurity-bar .obscurity-fill{background:var(--accent);width:50%}
+.obscurity-badge.obscure + .obscurity-bar .obscurity-fill{background:#e67e22;width:75%}
+.obscurity-badge.ultra + .obscurity-bar .obscurity-fill{background:#e74c3c;width:95%}
+.obscurity-score-num{font-size:.58rem;color:var(--muted);letter-spacing:.04em}
+
+/* ═══════════════════════════════════════
+   ALBUM PAGE MODAL
+═══════════════════════════════════════ */
+#album-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:600;overflow-y:auto;backdrop-filter:blur(10px)}
+#album-modal.open{display:block;animation:fadeUp .3s ease both}
+.album-modal-inner{max-width:860px;margin:40px auto;padding:0 20px 60px}
+.album-modal-header{display:flex;align-items:center;justify-content:space-between;padding:20px 0;border-bottom:1px solid var(--border);margin-bottom:32px}
+.album-modal-title{font-family:'DM Serif Display',serif;font-size:1.1rem;color:var(--muted);font-weight:400}
+.album-modal-close{background:none;border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.68rem;padding:6px 14px;cursor:pointer;letter-spacing:.08em;text-transform:uppercase;transition:all .14s}
+.album-modal-close:hover{border-color:var(--accent2);color:var(--accent2)}
+.album-page{display:grid;grid-template-columns:280px 1fr;gap:36px}
+@media(max-width:640px){.album-page{grid-template-columns:1fr}}
+.album-page-cover{position:relative}
+.album-page-cover img{width:100%;aspect-ratio:1;object-fit:cover;display:block}
+.album-page-cover-shadow{position:absolute;inset:0;box-shadow:inset 0 0 0 1px var(--border)}
+.album-page-right{display:flex;flex-direction:column;gap:20px}
+.album-page-title{font-family:'DM Serif Display',serif;font-size:clamp(1.6rem,3.5vw,2.8rem);font-weight:400;line-height:1.08;margin-bottom:4px}
+.album-page-artist{font-size:.9rem;color:var(--muted);letter-spacing:.04em;margin-bottom:12px}
+.album-page-meta{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:4px}
+.apm-tag{font-size:.62rem;padding:3px 8px;border:1px solid var(--border);color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.album-page-desc{font-size:.75rem;color:var(--muted);line-height:1.8;letter-spacing:.02em;border-left:2px solid var(--border);padding-left:14px;font-style:italic}
+.album-page-links{display:flex;gap:8px;flex-wrap:wrap}
+.album-page-section-title{font-size:.6rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:10px}
+.album-page-section-title::after{content:'';flex:1;height:1px;background:var(--border)}
+.album-page-tracklist{display:flex;flex-direction:column;gap:0}
+.apt-row{display:flex;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.72rem;transition:background .12s}
+.apt-row:last-child{border-bottom:none}
+.apt-row:hover{background:var(--surface2)}
+.apt-num{color:var(--muted);width:24px;text-align:right;flex-shrink:0;font-size:.65rem}
+.apt-name{flex:1}
+.apt-dur{color:var(--muted);flex-shrink:0;font-size:.65rem}
+.similar-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px}
+.similar-item{background:var(--surface);border:1px solid var(--border);padding:10px;cursor:pointer;transition:border-color .15s;font-size:.68rem}
+.similar-item:hover{border-color:var(--accent)}
+.similar-artist{color:var(--muted);font-size:.6rem;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.album-page-full-tracklist{max-height:320px;overflow-y:auto}
+.album-page-full-tracklist::-webkit-scrollbar{width:3px}
+.album-page-full-tracklist::-webkit-scrollbar-thumb{background:var(--border)}
+
+/* ═══════════════════════════════════════
+   COLLECTION / BADGES
+═══════════════════════════════════════ */
+#collection-section{display:none;margin-top:32px}
+#collection-section.open{display:block;animation:fadeUp .3s ease both}
+.collection-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.collection-stats{display:flex;gap:24px;flex-wrap:wrap;margin-bottom:24px;padding:18px;background:var(--surface);border:1px solid var(--border)}
+.coll-stat{display:flex;flex-direction:column;gap:3px}
+.coll-stat-num{font-family:'Bebas Neue',sans-serif;font-size:1.6rem;color:var(--accent);line-height:1}
+.coll-stat-label{font-size:.58rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+.badges-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.badge-card{background:var(--surface);border:1px solid var(--border);padding:14px 16px;display:flex;gap:12px;align-items:flex-start;transition:border-color .2s}
+.badge-card.earned{border-color:var(--accent)}
+.badge-card.locked{opacity:.4}
+.badge-icon{font-size:1.8rem;line-height:1;flex-shrink:0;width:36px;text-align:center}
+.badge-info{flex:1;min-width:0}
+.badge-name{font-size:.72rem;color:var(--text);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;font-weight:500}
+.badge-desc{font-size:.6rem;color:var(--muted);line-height:1.5;letter-spacing:.02em}
+.badge-progress{margin-top:6px;height:2px;background:var(--border)}
+.badge-progress-fill{height:100%;background:var(--accent);transition:width .5s ease}
+.badge-earned-label{font-size:.55rem;color:var(--accent);letter-spacing:.1em;text-transform:uppercase;margin-top:4px}
+.header-btn.collection-btn{border-color:#e8c84a88}
+.header-btn.collection-btn:hover,.header-btn.collection-btn.active{border-color:var(--accent);color:var(--accent)}
+.new-badge-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--accent);padding:14px 24px;display:flex;align-items:center;gap:12px;z-index:900;animation:toastIn .4s ease both;font-size:.75rem;letter-spacing:.04em;max-width:340px;box-shadow:0 0 40px #e8c84a22}
+@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.toast-icon{font-size:1.6rem;line-height:1}
+.toast-text strong{color:var(--accent);display:block;font-size:.8rem;letter-spacing:.06em;text-transform:uppercase}
+.country-origin-badge{font-size:.6rem;padding:2px 7px;border:1px solid var(--mb);color:var(--mb);letter-spacing:.08em;text-transform:uppercase;display:inline-block;margin-left:6px}
+
+/* ═══════════════════════════════════════
+   BUSCA DIRETA DE ÁLBUM
+═══════════════════════════════════════ */
+.search-panel{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--info);padding:18px 20px;margin-bottom:0;display:none;animation:fadeUp .25s ease both}
+.search-panel.open{display:block}
+.search-panel-title{font-size:.6rem;text-transform:uppercase;letter-spacing:.14em;color:var(--info);margin-bottom:12px}
+.search-row{display:flex;gap:8px;flex-wrap:wrap}
+.search-input{flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.72rem;padding:8px 12px;outline:none;letter-spacing:.04em;transition:border-color .15s}
+.search-input:focus{border-color:var(--info)}
+.search-input::placeholder{color:var(--muted)}
+.search-go-btn{background:var(--info);border:none;color:#000;font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:.12em;padding:8px 20px;cursor:pointer;white-space:nowrap;transition:opacity .15s}
+.search-go-btn:hover{opacity:.85}
+.search-go-btn:disabled{opacity:.45;cursor:not-allowed}
+.search-results{margin-top:12px;display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto}
+.search-result-item{display:flex;align-items:center;gap:12px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);cursor:pointer;transition:border-color .15s}
+.search-result-item:hover{border-color:var(--info)}
+.search-result-img{width:36px;height:36px;object-fit:cover;flex-shrink:0;background:var(--border)}
+.search-result-info{flex:1;min-width:0}
+.search-result-title{font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-result-artist{font-size:.6rem;color:var(--muted)}
+.search-empty{font-size:.7rem;color:var(--muted);padding:12px 0;text-align:center;letter-spacing:.04em}
+
+/* ═══════════════════════════════════════
+   ARTISTAS SIMILARES — card
+═══════════════════════════════════════ */
+.similar-section{margin-top:20px;border-top:1px solid var(--border);padding-top:16px}
+.similar-label{font-size:.6rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.similar-label::after{content:'';flex:1;height:1px;background:var(--border)}
+.similar-artists{display:flex;gap:8px;flex-wrap:wrap}
+.similar-artist-btn{background:none;border:1px solid var(--border);color:var(--muted);font-family:'DM Mono',monospace;font-size:.65rem;padding:5px 11px;cursor:pointer;letter-spacing:.04em;transition:all .16s;display:flex;align-items:center;gap:5px}
+.similar-artist-btn:hover{border-color:var(--accent);color:var(--accent)}
+.similar-artist-btn .sim-icon{opacity:.5;font-size:.7rem}
+.similar-loading{font-size:.62rem;color:var(--muted);letter-spacing:.04em;animation:pulse 1.5s infinite}
+
+/* ═══════════════════════════════════════
+   MODO ARTISTA ESPECÍFICO
+═══════════════════════════════════════ */
+.artist-mode-panel{background:var(--surface);border:1px solid var(--border);border-left:3px solid #9b59b6;padding:18px 20px;display:none;animation:fadeUp .25s ease both}
+.artist-mode-panel.open{display:block}
+.artist-mode-title{font-size:.6rem;text-transform:uppercase;letter-spacing:.14em;color:#9b59b6;margin-bottom:12px}
+.artist-input-row{display:flex;gap:8px;flex-wrap:wrap}
+.artist-input{flex:1;min-width:160px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.72rem;padding:8px 12px;outline:none;letter-spacing:.04em;transition:border-color .15s}
+.artist-input:focus{border-color:#9b59b6}
+.artist-input::placeholder{color:var(--muted)}
+.artist-spin-btn{background:#9b59b6;border:none;color:#fff;font-family:'Bebas Neue',sans-serif;font-size:1rem;letter-spacing:.12em;padding:8px 20px;cursor:pointer;white-space:nowrap;transition:opacity .15s}
+.artist-spin-btn:hover{opacity:.85}
+.artist-spin-btn:disabled{opacity:.45;cursor:not-allowed}
+.artist-mode-note{font-size:.6rem;color:var(--muted);margin-top:8px;letter-spacing:.03em}
+
+/* ═══════════════════════════════════════
+   WISHLIST
+═══════════════════════════════════════ */
+#wishlist-section{display:none;margin-top:32px}
+#wishlist-section.open{display:block;animation:fadeUp .3s ease both}
+.btn-wishlist{border-color:#7dcfff88;color:var(--info)}
+.btn-wishlist:hover,.btn-wishlist.in-wishlist{background:#7dcfff11;border-color:var(--info);color:var(--info)}
+.btn-wishlist.in-wishlist::before{content:'✓ ';}
+.wishlist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:14px}
+.wishlist-item{background:var(--surface);border:1px solid var(--info);cursor:pointer;transition:border-color .18s,transform .18s;position:relative;overflow:hidden}
+.wishlist-item:hover{border-color:var(--accent);transform:translateY(-3px)}
+.wishlist-item img{width:100%;aspect-ratio:1;object-fit:cover;display:block;filter:saturate(.8);transition:filter .2s}
+.wishlist-item:hover img{filter:saturate(1)}
+.wishlist-meta{padding:9px 10px}
+.wishlist-title{font-size:.72rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px}
+.wishlist-artist{font-size:.62rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
+.wishlist-remove{position:absolute;top:5px;right:5px;background:#000c;border:none;color:var(--muted);font-size:.75rem;cursor:pointer;padding:2px 5px;line-height:1;transition:color .15s}
+.wishlist-remove:hover{color:var(--accent2)}
+.wishlist-badge{position:absolute;top:6px;left:6px;background:var(--info);color:#000;font-size:.5rem;padding:2px 5px;letter-spacing:.06em;text-transform:uppercase}
+
+/* ═══════════════════════════════════════
+   GRÁFICOS DA COLEÇÃO
+═══════════════════════════════════════ */
+.collection-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+@media(max-width:700px){.collection-charts{grid-template-columns:1fr}}
+.chart-card{background:var(--surface);border:1px solid var(--border);padding:16px 18px}
+.chart-card-title{font-size:.6rem;text-transform:uppercase;letter-spacing:.13em;color:var(--muted);margin-bottom:14px}
+.chart-bar-row{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.chart-bar-label{font-size:.6rem;color:var(--muted);width:80px;text-align:right;flex-shrink:0;letter-spacing:.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chart-bar-track{flex:1;height:8px;background:var(--border);position:relative;overflow:hidden}
+.chart-bar-fill{height:100%;background:var(--accent);transition:width .6s ease;border-radius:0}
+.chart-bar-val{font-size:.6rem;color:var(--muted);width:28px;flex-shrink:0;letter-spacing:.02em}
+.chart-decade-row{display:flex;align-items:flex-end;gap:4px;height:80px;margin-bottom:8px}
+.chart-decade-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px}
+.chart-decade-bar{width:100%;background:var(--accent);transition:height .6s ease;min-height:2px}
+.chart-decade-lbl{font-size:.5rem;color:var(--muted);letter-spacing:.03em;text-align:center;white-space:nowrap}
+.chart-radar-wrap{display:flex;justify-content:center;padding:4px 0}
+.chart-empty{font-size:.68rem;color:var(--muted);text-align:center;padding:28px 0;letter-spacing:.04em}
+
+/* ═══════════════════════════════════════
+   COMPARTILHAR CARD
+═══════════════════════════════════════ */
+.btn-share{border-color:#e8c84a88;color:var(--accent)}
+.btn-share:hover{background:var(--accent);color:#000}
+.share-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:700;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
+.share-modal.open{display:flex;animation:fadeUp .22s ease both}
+.share-box{background:var(--surface);border:1px solid var(--border);border-top:3px solid var(--accent);padding:28px;max-width:400px;width:92%;position:relative}
+.share-box h3{font-family:'DM Serif Display',serif;font-size:1.3rem;font-weight:400;margin-bottom:16px}
+.share-card-preview{background:var(--bg);border:1px solid var(--border);padding:16px;margin-bottom:16px;position:relative;overflow:hidden}
+.share-card-preview::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--lastfm),var(--accent),#1DB954)}
+.scp-top{display:flex;gap:12px;align-items:flex-start;margin-bottom:12px}
+.scp-img{width:56px;height:56px;object-fit:cover;flex-shrink:0;background:var(--border)}
+.scp-info{flex:1;min-width:0}
+.scp-title{font-family:'DM Serif Display',serif;font-size:1rem;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.scp-artist{font-size:.68rem;color:var(--muted);margin-top:2px}
+.scp-year{font-size:.6rem;color:var(--accent);margin-top:3px;letter-spacing:.06em}
+.scp-badge-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.scp-obscurity{font-size:.58rem;padding:3px 8px;border:1px solid var(--accent);color:var(--accent);letter-spacing:.08em;text-transform:uppercase}
+.scp-rating{font-family:'Bebas Neue',sans-serif;font-size:1.1rem;color:var(--accent);letter-spacing:.06em}
+.scp-brand{font-size:.55rem;color:var(--muted);letter-spacing:.1em;text-align:right;margin-top:10px;text-transform:uppercase}
+.share-actions{display:flex;gap:8px;flex-wrap:wrap}
+.share-action-btn{flex:1;background:none;border:1px solid var(--border);color:var(--text);font-family:'DM Mono',monospace;font-size:.68rem;padding:9px 12px;cursor:pointer;letter-spacing:.06em;text-transform:uppercase;transition:all .14s;text-align:center}
+.share-action-btn:hover{border-color:var(--accent);color:var(--accent)}
+.share-action-btn.copied{border-color:var(--success);color:var(--success)}
+.share-close{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer}
+.share-close:hover{color:var(--text)}
+
+/* ═══════════════════════════════════════
+   PWA INSTALL BANNER
+═══════════════════════════════════════ */
+.pwa-banner{display:none;position:fixed;bottom:16px;left:16px;background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--success);padding:12px 16px;z-index:200;max-width:300px;animation:fadeUp .3s ease both}
+.pwa-banner.visible{display:flex;align-items:center;gap:12px}
+.pwa-banner p{font-size:.68rem;color:var(--muted);letter-spacing:.03em;line-height:1.5}
+.pwa-banner p strong{color:var(--success)}
+.pwa-install-btn{background:var(--success);border:none;color:#000;font-family:'Bebas Neue',sans-serif;font-size:.9rem;letter-spacing:.1em;padding:7px 14px;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
+.pwa-install-btn:hover{opacity:.85}
+.pwa-dismiss{background:none;border:none;color:var(--muted);font-size:.9rem;cursor:pointer;padding:2px;flex-shrink:0}
+.pwa-dismiss:hover{color:var(--text)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SPIN<span>REC</span></div>
+  <div class="header-right">
+    <span class="header-badge" id="listened-badge">0 escutados</span>
+    <button class="header-btn" id="search-btn" onclick="toggleSearchPanel()" title="Buscar álbum específico">🔍 Buscar</button>
+    <button class="header-btn" id="artist-btn" onclick="toggleArtistPanel()" title="Girar por artista">🎤 Artista</button>
+    <button class="header-btn collection-btn" id="coll-btn" onclick="toggleCollection()">🏆 Coleção</button>
+    <button class="header-btn btn-adventure" onclick="openAdventure()">🎲 Aventura</button>
+    <button class="header-btn" id="hist-btn" onclick="toggleHistory()">Histórico</button>
+    <button class="header-btn" id="wishlist-btn" onclick="toggleWishlist()" title="Quero ouvir">🔖 Wishlist</button>
+  </div>
+</header>
+
+<!-- SOURCE STATUS BAR -->
+<div class="source-bar">
+  <div class="source-pill lastfm" id="pill-lastfm" title="Last.fm — descoberta por tag/gênero">
+    <span class="source-dot"></span> Last.fm
+  </div>
+  <span class="source-sep">→</span>
+  <div class="source-pill mb" id="pill-mb" title="MusicBrainz — metadados abertos">
+    <span class="source-dot"></span> MusicBrainz
+  </div>
+  <span class="source-sep">→</span>
+  <div class="source-pill spotify" id="pill-spotify" title="Spotify — capas + link de escuta">
+    <span class="source-dot"></span> Spotify
+  </div>
+  <span class="source-sep">→</span>
+  <div class="source-pill db" id="pill-db" title="Banco local (localStorage → Supabase)">
+    <span class="source-dot"></span> DB local
+  </div>
+</div>
+
+<!-- BUSCA DIRETA -->
+<div class="search-panel" id="search-panel">
+  <div class="search-panel-title">🔍 Busca Direta — salva um álbum que você já conhece</div>
+  <div class="search-row">
+    <input class="search-input" id="search-album" type="text" placeholder="Nome do álbum…" oninput="debouncedSearch()" onkeydown="if(event.key==='Enter')doSearch()">
+    <input class="search-input" id="search-artist" type="text" placeholder="Artista (opcional)" onkeydown="if(event.key==='Enter')doSearch()">
+    <button class="search-go-btn" id="search-go-btn" onclick="doSearch()">Buscar</button>
+  </div>
+  <div class="search-results" id="search-results"></div>
+</div>
+
+<!-- MODO ARTISTA ESPECÍFICO -->
+<div class="artist-mode-panel" id="artist-mode-panel">
+  <div class="artist-mode-title">🎤 Modo Artista — descubra a discografia de quem você ama</div>
+  <div class="artist-input-row">
+    <input class="artist-input" id="artist-name-input" type="text" placeholder="Nome do artista (ex: Miles Davis, Caetano Veloso)…" onkeydown="if(event.key==='Enter')spinByArtist()">
+    <button class="artist-spin-btn" id="artist-spin-btn" onclick="spinByArtist()">⟳ GIRAR</button>
+  </div>
+  <p class="artist-mode-note">Sorteia um álbum que você ainda não escutou desse artista</p>
+</div>
+
+<div id="auth-banner">
+  <div>
+    <p id="auth-text"><strong>Conecte sua conta Spotify</strong> — gratuita ou Premium — para desbloquear capas em alta resolução e links de escuta.</p>
+    <p class="auth-note">Gêneros descobertos via <span>Last.fm</span> · metadados via MusicBrainz · funciona parcialmente sem login</p>
+  </div>
+  <button class="auth-btn login" id="auth-action-btn" onclick="handleAuth()">Entrar com Spotify</button>
+</div>
+
+<section class="hero">
+  <div class="hero-text">
+    <h1>Descubra seu<br>próximo <em>álbum</em><br>favorito.</h1>
+    <p>Selecione gênero, duração e época. O SPINREC usa Last.fm para descobrir, MusicBrainz para detalhar e Spotify para conectar você à música.</p>
+    <div class="stat-row">
+      <div class="stat"><span class="stat-num">∞</span><span class="stat-label">Álbuns</span></div>
+      <div class="stat"><span class="stat-num" id="stat-spins">0</span><span class="stat-label">Giros</span></div>
+      <div class="stat"><span class="stat-num" id="stat-listened">0</span><span class="stat-label">Escutados</span></div>
+    </div>
+    <div class="arch-note">
+      <strong>ARQUITETURA ATUAL</strong><br>
+      Last.fm → MusicBrainz → Spotify + localStorage<br>
+      <strong>PRÓXIMA ETAPA</strong><br>
+      Next.js + Supabase + Vercel
+    </div>
+  </div>
+
+  <div class="filters-panel">
+    <div class="filter-group">
+      <label>Gênero Musical <span style="color:var(--lastfm);font-size:.58rem">(via Last.fm)</span></label>
+      <input class="genre-search" type="text" placeholder="Buscar gênero…" oninput="filterGenres(this.value)">
+      <div class="chips" id="genre-chips"></div>
+    </div>
+
+    <div class="filter-group">
+      <label>Duração máxima</label>
+      <div class="chips" id="dur-chips">
+        <button class="chip active" data-min="0"  data-max="9999" onclick="pick(this,'dur')">Qualquer</button>
+        <button class="chip" data-min="0"  data-max="20"  onclick="pick(this,'dur')">≤ 20 min</button>
+        <button class="chip" data-min="0"  data-max="30"  onclick="pick(this,'dur')">≤ 30 min</button>
+        <button class="chip" data-min="0"  data-max="40"  onclick="pick(this,'dur')">≤ 40 min</button>
+        <button class="chip" data-min="0"  data-max="50"  onclick="pick(this,'dur')">≤ 50 min</button>
+        <button class="chip" data-min="0"  data-max="60"  onclick="pick(this,'dur')">≤ 60 min</button>
+        <button class="chip" data-min="61" data-max="9999" onclick="pick(this,'dur')">60+ min</button>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label>Formato</label>
+      <div class="chips" id="type-chips">
+        <button class="chip active" data-val=""       onclick="pick(this,'type')">Todos</button>
+        <button class="chip"        data-val="album"  onclick="pick(this,'type')">Álbum</button>
+        <button class="chip"        data-val="single" onclick="pick(this,'type')">EP / Single</button>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label>Época</label>
+      <div class="chips" id="era-chips">
+        <button class="chip active" data-from="1900" data-to="2099" onclick="pick(this,'era')">Qualquer</button>
+        <button class="chip" data-from="1950" data-to="1969" onclick="pick(this,'era')">50s–60s</button>
+        <button class="chip" data-from="1970" data-to="1979" onclick="pick(this,'era')">70s</button>
+        <button class="chip" data-from="1980" data-to="1989" onclick="pick(this,'era')">80s</button>
+        <button class="chip" data-from="1990" data-to="1999" onclick="pick(this,'era')">90s</button>
+        <button class="chip" data-from="2000" data-to="2009" onclick="pick(this,'era')">2000s</button>
+        <button class="chip" data-from="2010" data-to="2019" onclick="pick(this,'era')">2010s</button>
+        <button class="chip" data-from="2020" data-to="2099" onclick="pick(this,'era')">2020s+</button>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label>Opções</label>
+      <div class="chips">
+        <button class="chip" id="excl-chip" onclick="toggleExcl(this)">Excluir já escutados</button>
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label>País / Região <span style="color:var(--mb);font-size:.58rem">(via tag Last.fm)</span></label>
+      <div class="country-grid" id="country-grid"></div>
+    </div>
+
+    <button class="spin-btn" id="spin-btn" onclick="spin()">⟳ &nbsp; GIRAR O DISCO</button>
+    <p class="spin-btn-note">Descoberta via <span>Last.fm</span> · funciona sem login</p>
+  </div>
+</section>
+
+<main class="main">
+  <div id="load-wrap" style="display:none">
+    <div class="spinner on"></div>
+    <p class="loading-text on">Consultando fontes…</p>
+    <div class="loading-steps on" id="loading-steps">
+      <span class="ls ls-lastfm" id="ls1">① Last.fm — buscando álbuns por tag…</span>
+      <span class="ls ls-mb"     id="ls2">② MusicBrainz — enriquecendo metadados…</span>
+      <span class="ls ls-spotify" id="ls3">③ Spotify — resolvendo capa + link…</span>
+    </div>
+  </div>
+
+  <div id="result-section">
+    <p class="section-label">Recomendação</p>
+    <div id="adventure-badge-wrap"></div>
+    <div id="card-wrap"></div>
+
+    <!-- REFINE SECTION -->
+    <div id="refine-section">
+      <div class="refine-label">Girar parecido, mas…</div>
+      <div class="refine-btns">
+        <button class="refine-btn" data-dir="heavier" onclick="spinRefined('heavier')">🔥 mais pesado</button>
+        <button class="refine-btn" data-dir="experimental" onclick="spinRefined('experimental')">🌀 mais experimental</button>
+        <button class="refine-btn" data-dir="calmer" onclick="spinRefined('calmer')">🌊 mais calmo</button>
+        <button class="refine-btn" data-dir="darker" onclick="spinRefined('darker')">🌑 mais sombrio</button>
+        <button class="refine-btn" data-dir="popular" onclick="spinRefined('popular')">⭐ mais popular</button>
+        <button class="refine-btn" data-dir="obscure" onclick="spinRefined('obscure')">🕳 mais obscuro</button>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider" id="div1" style="display:none">
+
+  <div id="history-section">
+    <div class="history-header">
+      <p class="section-label" style="margin-bottom:0;flex:1">Histórico de escutas</p>
+      <button class="clear-btn" onclick="clearHist()">Limpar tudo</button>
+    </div>
+    <div class="history-tabs">
+      <button class="htab active" onclick="setHistTab('all',this)">Todos</button>
+      <button class="htab" onclick="setHistTab('listened',this)">✓ Escutados</button>
+      <button class="htab" onclick="setHistTab('favorites',this)">★ Favoritos</button>
+      <button class="htab" onclick="setHistTab('rated',this)">Avaliados</button>
+    </div>
+    <div class="history-controls">
+      <select class="history-sort" onchange="renderHist()">
+        <option value="recent">Mais recentes</option>
+        <option value="rating">Melhor avaliados</option>
+        <option value="alpha">A–Z</option>
+      </select>
+      <span class="hist-count" id="hist-count"></span>
+    </div>
+    <div class="history-grid" id="hist-grid"></div>
+  </div>
+
+  <!-- COLLECTION SECTION -->
+  <div id="collection-section">
+    <div class="collection-header">
+      <p class="section-label" style="margin-bottom:0;flex:1">Sua Coleção</p>
+    </div>
+    <div class="collection-stats" id="coll-stats"></div>
+    <p class="section-label">Gráficos</p>
+    <div class="collection-charts" id="collection-charts"></div>
+    <p class="section-label">Conquistas</p>
+    <div class="badges-grid" id="badges-grid"></div>
+  </div>
+  <!-- WISHLIST SECTION -->
+  <div id="wishlist-section">
+    <div class="history-header">
+      <p class="section-label" style="margin-bottom:0;flex:1">🔖 Quero Ouvir <span id="wishlist-count" style="font-size:.62rem;color:var(--info);margin-left:8px"></span></p>
+      <button class="clear-btn" onclick="clearWishlist()">Limpar wishlist</button>
+    </div>
+    <div class="wishlist-grid" id="wishlist-grid"></div>
+  </div>
+</main>
+
+<!-- ALBUM PAGE MODAL -->
+<div id="album-modal">
+  <div class="album-modal-inner">
+    <div class="album-modal-header">
+      <span class="album-modal-title">Página do Álbum</span>
+      <button class="album-modal-close" onclick="closeAlbumPage()">← Voltar</button>
+    </div>
+    <div id="album-modal-content"></div>
+  </div>
+</div>
+
+<!-- ADVENTURE MODAL -->
+<div id="adventure-modal">
+  <div class="adventure-box">
+    <button class="adventure-close" onclick="closeAdventure()">×</button>
+    <h2>Modo <em>Aventura</em></h2>
+    <p>Escolha uma experiência e o SPINREC sorteia algo especial pra você.</p>
+    <div class="adventure-options">
+      <button class="adventure-opt" data-mode="challenge" onclick="startAdventure('challenge')">
+        <span class="adv-icon">🎯</span>
+        <span class="adv-title">Me Desafie</span>
+        <span class="adv-desc">Algo fora da sua zona de conforto. Pode surpreender.</span>
+        <span class="adv-badge">Desconhecido</span>
+      </button>
+      <button class="adventure-opt" data-mode="different" onclick="startAdventure('different')">
+        <span class="adv-icon">🌍</span>
+        <span class="adv-title">Totalmente Diferente</span>
+        <span class="adv-desc">Gênero aleatório, artista que você provavelmente nunca ouviu.</span>
+        <span class="adv-badge">Surpresa total</span>
+      </button>
+      <button class="adventure-opt" data-mode="cult" onclick="startAdventure('cult')">
+        <span class="adv-icon">🖤</span>
+        <span class="adv-title">Álbum Cult</span>
+        <span class="adv-desc">Aclamado por quem sabe, ignorado pelo mainstream.</span>
+        <span class="adv-badge">Underground</span>
+      </button>
+      <button class="adventure-opt" data-mode="classic" onclick="startAdventure('classic')">
+        <span class="adv-icon">🏆</span>
+        <span class="adv-title">Clássico Obrigatório</span>
+        <span class="adv-desc">Os álbuns que todo mundo deveria ter escutado ao menos uma vez.</span>
+        <span class="adv-badge">Essencial</span>
+      </button>
+      <button class="adventure-opt" data-mode="underground" onclick="startAdventure('underground')">
+        <span class="adv-icon">🕳</span>
+        <span class="adv-title">Underground</span>
+        <span class="adv-desc">Pouco conhecido, muito pouco popular, potencialmente genial.</span>
+        <span class="adv-badge">Raro</span>
+      </button>
+      <button class="adventure-opt" data-mode="random" onclick="startAdventure('random')">
+        <span class="adv-icon">🎲</span>
+        <span class="adv-title">Roleta Total</span>
+        <span class="adv-desc">Sem critério nenhum. Caos puro. Pode ser qualquer coisa.</span>
+        <span class="adv-badge">Caos</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- SUPABASE MIGRATION BANNER -->
+<div class="migration-note" id="migration-note">
+  <button onclick="document.getElementById('migration-note').remove()">×</button>
+  <strong>💾 DB LOCAL ATIVO</strong>
+  Histórico salvo em localStorage.<br>
+  Migre para Supabase para sync entre dispositivos.
+</div>
+
+<!-- SHARE MODAL -->
+<div class="share-modal" id="share-modal">
+  <div class="share-box">
+    <button class="share-close" onclick="closeShareModal()">×</button>
+    <h3>Compartilhar Álbum</h3>
+    <div class="share-card-preview" id="share-preview"></div>
+    <div class="share-actions">
+      <button class="share-action-btn" id="share-copy-btn" onclick="copyShareText()">📋 Copiar texto</button>
+      <button class="share-action-btn" id="share-tweet-btn" onclick="shareTweet()">𝕏 Twitter</button>
+      <button class="share-action-btn" id="share-native-btn" onclick="shareNative()" style="display:none">↗ Compartilhar</button>
+    </div>
+  </div>
+</div>
+
+<!-- PWA INSTALL BANNER -->
+<div class="pwa-banner" id="pwa-banner">
+  <div>
+    <p><strong>📱 Instalar SPINREC</strong><br>Acesso rápido e funciona offline</p>
+  </div>
+  <button class="pwa-install-btn" id="pwa-install-btn" onclick="installPWA()">Instalar</button>
+  <button class="pwa-dismiss" onclick="dismissPWA()">×</button>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  SPINREC — NOVAS FEATURES v2
+//  · Busca direta (Last.fm search)
+//  · Artistas similares no card (artist.getSimilar)
+//  · Modo artista específico (artist.getTopAlbums)
+//  · Gráficos da coleção (radar gênero, timeline décadas)
+//  · Wishlist separada do histórico
+//  · Compartilhar card (texto + tweet + Web Share API)
+//  · PWA básico (manifest + service worker)
+// ════════════════════════════════════════════════════════════════
+
+// ══════════════════════
+//  BUSCA DIRETA
+// ══════════════════════
+let searchDebounceTimer = null;
+let searchPanelOpen = false;
+function toggleSearchPanel(){
+  searchPanelOpen = !searchPanelOpen;
+  document.getElementById('search-panel').classList.toggle('open', searchPanelOpen);
+  document.getElementById('search-btn').classList.toggle('active', searchPanelOpen);
+  if(searchPanelOpen) document.getElementById('search-album').focus();
+  // Close artist panel if open
+  if(searchPanelOpen && artistPanelOpen) toggleArtistPanel();
+}
+
+function debouncedSearch(){
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(()=>{
+    const q = document.getElementById('search-album').value.trim();
+    if(q.length >= 3) doSearch();
+    else document.getElementById('search-results').innerHTML='';
+  }, 400);
+}
+
+async function doSearch(){
+  const albumQ = document.getElementById('search-album').value.trim();
+  const artistQ = document.getElementById('search-artist').value.trim();
+  if(!albumQ) return;
+
+  const btn = document.getElementById('search-go-btn');
+  btn.disabled = true;
+  btn.textContent = '…';
+  document.getElementById('search-results').innerHTML = '<div class="search-empty">Buscando…</div>';
+
+  try {
+    // Last.fm album.search
+    const url = `${LASTFM_BASE}/?method=album.search&album=${encodeURIComponent(albumQ)}&api_key=${LASTFM_API_KEY}&format=json&limit=8`;
+    const r = await fetch(url);
+    const d = await r.json();
+    let results = d.results?.albummatches?.album || [];
+    if(artistQ) results = results.filter(a => a.artist.toLowerCase().includes(artistQ.toLowerCase()));
+
+    if(!results.length){
+      document.getElementById('search-results').innerHTML = '<div class="search-empty">Nenhum álbum encontrado.</div>';
+      return;
+    }
+
+    document.getElementById('search-results').innerHTML = results.map(a => {
+      const img = LastFmService.getBestImage(a.image) || '';
+      return `<div class="search-result-item" onclick="loadSearchResult('${x(a.name)}','${x(a.artist)}')">
+        <img class="search-result-img" src="${x(img)}" onerror="this.style.display='none'" alt="">
+        <div class="search-result-info">
+          <div class="search-result-title">${x(a.name)}</div>
+          <div class="search-result-artist">${x(a.artist)}</div>
+        </div>
+        <span style="font-size:.6rem;color:var(--info);letter-spacing:.06em;flex-shrink:0">▶ Girar</span>
+      </div>`;
+    }).join('');
+  } catch(e){
+    document.getElementById('search-results').innerHTML = '<div class="search-empty">Erro na busca. Tente novamente.</div>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Buscar';
+  }
+}
+
+async function loadSearchResult(albumName, artistName){
+  // Clear search UI
+  document.getElementById('search-results').innerHTML = '<div class="search-empty">Carregando…</div>';
+  document.getElementById('search-go-btn').disabled = true;
+
+  showLoad(true); hideRes();
+  try {
+    const mbData = await MusicBrainzService.searchRelease(albumName, artistName);
+    const spData = await SpotifyService.resolveAlbum(albumName, artistName);
+    let tracks = [];
+    if(spData?.spotifyId) tracks = await SpotifyService.getTracklist(spData.spotifyId);
+    if(!tracks.length && mbData?.mbid) tracks = await MusicBrainzService.getTracklist(mbData.mbid);
+    const totalMin = tracks.length ? Math.round(tracks.reduce((s,t)=>s+(t.ms||0),0)/60000) : 0;
+
+    // Get album info from Last.fm for popularity + tags
+    const lfmInfo = await LastFmService.getAlbumInfo(artistName, albumName);
+    const popularity = parseInt(lfmInfo?.listeners || lfmInfo?.playcount || 0);
+    const genres = (lfmInfo?.tags?.tag || []).map(t=>t.name).slice(0,3);
+    const lastfmUrl = lfmInfo?.url || '';
+    const image = spData?.image || (lfmInfo?.image ? LastFmService.getBestImage(lfmInfo.image) : '') || '';
+
+    const album = {
+      id: spData?.spotifyId || mbData?.mbid || 'search_'+btoa(encodeURIComponent(artistName+albumName)).substring(0,20),
+      name: albumName, artist: artistName,
+      year: mbData?.date?.substring(0,4) || '?',
+      type: 'album',
+      tracks: tracks.length ? tracks : [{n:1,name:'Tracklist indisponível',ms:0}],
+      totalTracks: tracks.length, durationMin: totalMin, image, genres,
+      popularity, url: spData?.url || '', lastfmUrl,
+      label: mbData?.label || '', country: mbData?.country || '', mbid: mbData?.mbid || '',
+      _sources:{lastfm:true, mb:!!mbData, spotify:!!(spData?.image||spData?.url)}
+    };
+
+    curAlbum = album; spins++;
+    document.getElementById('stat-spins').textContent = spins;
+    DBService.addAlbum(album);
+    checkBadges(true);
+    renderCard(album);
+    document.getElementById('result-section').style.display = 'block';
+    document.getElementById('result-section').scrollIntoView({behavior:'smooth',block:'start'});
+    document.getElementById('search-results').innerHTML = '';
+  } catch(e){
+    showErr('Erro ao carregar álbum.<br><small>'+e.message+'</small>');
+  } finally {
+    showLoad(false);
+    document.getElementById('search-go-btn').disabled = false;
+  }
+}
+
+// ══════════════════════
+//  ARTISTAS SIMILARES
+// ══════════════════════
+async function loadSimilarArtists(artistName){
+  const wrap = document.getElementById('similar-artists-wrap');
+  if(!wrap) return;
+  wrap.innerHTML = '<span class="similar-loading">Buscando artistas similares…</span>';
+
+  try {
+    const url = `${LASTFM_BASE}/?method=artist.getSimilar&artist=${encodeURIComponent(artistName)}&api_key=${LASTFM_API_KEY}&format=json&limit=8`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const similar = d.similarartists?.artist || [];
+
+    if(!similar.length){
+      wrap.innerHTML = '<span class="similar-loading" style="opacity:.5">Nenhum artista similar encontrado.</span>';
+      return;
+    }
+
+    wrap.innerHTML = similar.slice(0,5).map(a =>
+      `<button class="similar-artist-btn" onclick="spinBySpecificArtist('${x(a.name)}')">
+        <span class="sim-icon">⟳</span>${x(a.name)}
+      </button>`
+    ).join('');
+  } catch(e){
+    wrap.innerHTML = '<span class="similar-loading" style="opacity:.5">—</span>';
+  }
+}
+
+// ══════════════════════
+//  MODO ARTISTA
+// ══════════════════════
+let artistPanelOpen = false;
+function toggleArtistPanel(){
+  artistPanelOpen = !artistPanelOpen;
+  document.getElementById('artist-mode-panel').classList.toggle('open', artistPanelOpen);
+  document.getElementById('artist-btn').classList.toggle('active', artistPanelOpen);
+  if(artistPanelOpen) document.getElementById('artist-name-input').focus();
+  if(artistPanelOpen && searchPanelOpen) toggleSearchPanel();
+}
+
+async function spinByArtist(){
+  const name = document.getElementById('artist-name-input').value.trim();
+  if(!name) { document.getElementById('artist-name-input').focus(); return; }
+  await spinBySpecificArtist(name);
+}
+
+async function spinBySpecificArtist(artistName){
+  document.getElementById('artist-spin-btn').disabled = true;
+  showLoad(true); hideRes();
+  document.getElementById('refine-section').style.display = 'none';
+
+  try {
+    const albums = await LastFmService.getArtistAlbums(artistName);
+    if(!albums.length) { showErr(`Nenhum álbum encontrado para "${x(artistName)}".`); return; }
+
+    // Filter out already listened
+    const h = DBService.getHistory();
+    const listenedNames = h.filter(a=>a.listened).map(a=>a.name.toLowerCase());
+    let pool = shuffle(albums.filter(a => !listenedNames.includes(a.name.toLowerCase())));
+    if(!pool.length) pool = shuffle(albums); // all listened? show anyway
+
+    // Try to build a full album object
+    let album = null;
+    for(let i = 0; i < Math.min(pool.length, 5); i++){
+      const candidate = pool[i];
+      if(!candidate.name || candidate.name==='(null)') continue;
+      const mbData = await MusicBrainzService.searchRelease(candidate.name, artistName);
+      const spData = await SpotifyService.resolveAlbum(candidate.name, artistName);
+      let tracks = [];
+      if(spData?.spotifyId) tracks = await SpotifyService.getTracklist(spData.spotifyId);
+      if(!tracks.length && mbData?.mbid) tracks = await MusicBrainzService.getTracklist(mbData.mbid);
+      const totalMin = tracks.length ? Math.round(tracks.reduce((s,t)=>s+(t.ms||0),0)/60000) : 0;
+      const image = spData?.image || LastFmService.getBestImage(candidate.image) || '';
+
+      album = {
+        id: spData?.spotifyId || mbData?.mbid || lfmId(candidate),
+        name: candidate.name, artist: artistName,
+        year: mbData?.date?.substring(0,4) || '?',
+        type: 'album',
+        tracks: tracks.length ? tracks : [{n:1,name:'Tracklist indisponível',ms:0}],
+        totalTracks: tracks.length, durationMin: totalMin, image,
+        genres: (candidate.tags?.tag||[]).map(t=>t.name).slice(0,3),
+        popularity: parseInt(candidate.playcount||0),
+        url: spData?.url||candidate.url||'', lastfmUrl: candidate.url||'',
+        label: mbData?.label||'', country: mbData?.country||'', mbid: mbData?.mbid||'',
+        _sources:{lastfm:true, mb:!!mbData, spotify:!!(spData?.image||spData?.url)},
+        _artistMode: artistName
+      };
+      break;
+    }
+
+    if(!album){ showErr(`Não foi possível montar um álbum completo de "${x(artistName)}".`); return; }
+    curAlbum = album; spins++;
+    document.getElementById('stat-spins').textContent = spins;
+    DBService.addAlbum(album);
+    checkBadges(true);
+    renderCard(album);
+    document.getElementById('result-section').style.display = 'block';
+    document.getElementById('result-section').scrollIntoView({behavior:'smooth',block:'start'});
+  } catch(e){
+    console.error(e);
+    showErr('Erro no modo artista.<br><small>'+e.message+'</small>');
+  } finally {
+    showLoad(false);
+    document.getElementById('artist-spin-btn').disabled = false;
+  }
+}
+
+// ══════════════════════
+//  WISHLIST
+// ══════════════════════
+const WishlistService = {
+  KEY: 'spinrec4_wish',
+  get(){ try{return JSON.parse(localStorage.getItem(this.KEY)||'[]')}catch{return[]} },
+  save(w){ localStorage.setItem(this.KEY, JSON.stringify(w)) },
+  add(a){
+    let w = this.get();
+    if(!w.find(x=>x.id===a.id)) w.unshift({...a, _wishTs: Date.now()});
+    this.save(w); syncWishlistCount();
+  },
+  remove(id){
+    let w = this.get().filter(a=>a.id!==id);
+    this.save(w); syncWishlistCount();
+    if(wishOpen) renderWishlist();
+  },
+  has(id){ return !!this.get().find(a=>a.id===id); },
+  clear(){ if(!confirm('Limpar wishlist?'))return; localStorage.removeItem(this.KEY); syncWishlistCount(); renderWishlist(); }
+};
+
+let wishOpen = false;
+function toggleWishlist(){
+  wishOpen = !wishOpen;
+  document.getElementById('wishlist-section').classList.toggle('open', wishOpen);
+  document.getElementById('wishlist-btn').classList.toggle('active', wishOpen);
+  if(wishOpen) renderWishlist();
+}
+
+function syncWishlistCount(){
+  const n = WishlistService.get().length;
+  document.getElementById('wishlist-count').textContent = n ? n+' álbuns' : '';
+}
+
+function renderWishlist(){
+  const g = document.getElementById('wishlist-grid');
+  const w = WishlistService.get();
+  if(!w.length){
+    g.innerHTML = '<div class="empty-state">Nenhum álbum na wishlist ainda.<br><small style="font-size:.62rem;color:var(--muted)">Use o botão 🔖 nos cards para salvar pra depois.</small></div>';
+    return;
+  }
+  g.innerHTML = w.map(a=>`
+<div class="wishlist-item" onclick="loadAlbumFromHistory('${a.id}')">
+  <span class="wishlist-badge">🔖</span>
+  <button class="wishlist-remove" onclick="event.stopPropagation();WishlistService.remove('${a.id}')" title="Remover">×</button>
+  <img src="${x(a.image||'')}" alt="${x(a.name)}" loading="lazy" onerror="this.style.display='none'">
+  <div class="wishlist-meta">
+    <div class="wishlist-title">${x(a.name)}</div>
+    <div class="wishlist-artist">${x(a.artist)}</div>
+  </div>
+</div>`).join('');
+}
+
+function clearWishlist(){ WishlistService.clear(); }
+
+// ══════════════════════
+//  COMPARTILHAR CARD
+// ══════════════════════
+function openShareModal(album){
+  if(!album) return;
+  const o = calcObscurityScore(album.popularity);
+  const h = DBService.getHistory();
+  const e = h.find(a=>a.id===album.id)||{};
+  const rating = e.rating||0;
+  const ratingStr = rating ? `${rating.toFixed(1)}/5 ⭐` : '';
+
+  document.getElementById('share-preview').innerHTML = `
+<div class="scp-top">
+  <img class="scp-img" src="${x(album.image||'')}" onerror="this.style.display='none'" alt="">
+  <div class="scp-info">
+    <div class="scp-title">${x(album.name)}</div>
+    <div class="scp-artist">${x(album.artist)}</div>
+    <div class="scp-year">${album.year}${album.durationMin?' · '+album.durationMin+' min':''}</div>
+  </div>
+</div>
+<div class="scp-badge-row">
+  <span class="scp-obscurity">${o.label}</span>
+  ${ratingStr?`<span class="scp-rating">${ratingStr}</span>`:''}
+</div>
+<div class="scp-brand">SPINREC — spinrec.app</div>`;
+
+  // Show native share button if supported
+  if(navigator.share) document.getElementById('share-native-btn').style.display='';
+
+  document.getElementById('share-modal').classList.add('open');
+}
+
+function closeShareModal(){
+  document.getElementById('share-modal').classList.remove('open');
+}
+
+function buildShareText(album){
+  if(!album) return '';
+  const o = calcObscurityScore(album.popularity);
+  const h = DBService.getHistory();
+  const e = h.find(a=>a.id===album.id)||{};
+  const rating = e.rating ? ` · ${e.rating.toFixed(1)}/5 ⭐` : '';
+  const url = album.url || album.lastfmUrl || '';
+  return `🎵 ${album.name} — ${album.artist} (${album.year})\n${o.label}${rating}\n\nDescoberto via SPINREC${url?'\n'+url:''}`;
+}
+
+function copyShareText(){
+  if(!curAlbum) return;
+  const text = buildShareText(curAlbum);
+  navigator.clipboard.writeText(text).then(()=>{
+    const btn = document.getElementById('share-copy-btn');
+    btn.textContent = '✓ Copiado!';
+    btn.classList.add('copied');
+    setTimeout(()=>{ btn.textContent = '📋 Copiar texto'; btn.classList.remove('copied'); }, 2200);
+  }).catch(()=> alert(text));
+}
+
+function shareTweet(){
+  if(!curAlbum) return;
+  const text = buildShareText(curAlbum);
+  window.open('https://twitter.com/intent/tweet?text='+encodeURIComponent(text), '_blank', 'noopener');
+}
+
+async function shareNative(){
+  if(!curAlbum || !navigator.share) return;
+  try {
+    await navigator.share({ title: curAlbum.name+' — '+curAlbum.artist, text: buildShareText(curAlbum), url: curAlbum.url||curAlbum.lastfmUrl||'' });
+  } catch(e){ /* cancelled */ }
+}
+
+document.getElementById('share-modal').addEventListener('click', function(e){
+  if(e.target===this) closeShareModal();
+});
+
+// ══════════════════════
+//  GRÁFICOS DA COLEÇÃO
+// ══════════════════════
+function renderCollectionCharts(){
+  const h = DBService.getHistory();
+  const listened = h.filter(a=>a.listened);
+  const chartsEl = document.getElementById('collection-charts');
+  if(!chartsEl) return;
+
+  if(!listened.length){
+    chartsEl.innerHTML = '<div class="chart-empty" style="grid-column:1/-1">Marque álbuns como escutados para ver seus gráficos.</div>';
+    return;
+  }
+
+  // Gêneros top 6
+  const genreMap = {};
+  listened.forEach(a=>(a.genres||[]).forEach(g=>{ genreMap[g]=(genreMap[g]||0)+1; }));
+  const topGenres = Object.entries(genreMap).sort((a,b)=>b[1]-a[1]).slice(0,6);
+  const maxG = topGenres[0]?.[1] || 1;
+
+  // Décadas
+  const decadeMap = {};
+  listened.forEach(a=>{
+    if(!a.year||a.year==='?') return;
+    const d = Math.floor(parseInt(a.year)/10)*10;
+    decadeMap[d] = (decadeMap[d]||0)+1;
+  });
+  const decades = Object.entries(decadeMap).sort((a,b)=>+a[0]-+b[0]);
+  const maxD = Math.max(...decades.map(d=>d[1]), 1);
+
+  // Obscuridade
+  const obscLevels = {mainstream:0,cult:0,obscure:0,ultra:0};
+  listened.forEach(a=>{ const o=calcObscurityScore(parseInt(a.popularity||0)); obscLevels[o.level]++; });
+  const maxO = Math.max(...Object.values(obscLevels), 1);
+  const obscLabels = {mainstream:'Mainstream',cult:'Cult',obscure:'Obscuro',ultra:'Ultra Obscuro'};
+  const obscColors = {mainstream:'#1DB954',cult:'var(--accent)',obscure:'#e67e22',ultra:'#e74c3c'};
+
+  chartsEl.innerHTML = `
+<div class="chart-card">
+  <div class="chart-card-title">Top Gêneros</div>
+  ${topGenres.length ? topGenres.map(([g,n])=>`
+    <div class="chart-bar-row">
+      <div class="chart-bar-label">${x(g)}</div>
+      <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${Math.round(n/maxG*100)}%"></div></div>
+      <div class="chart-bar-val">${n}</div>
+    </div>
+  `).join('') : '<div class="chart-empty">Sem dados</div>'}
+</div>
+
+<div class="chart-card">
+  <div class="chart-card-title">Por Década</div>
+  ${decades.length ? `<div class="chart-decade-row">
+    ${decades.map(([dec,n])=>`
+      <div class="chart-decade-col">
+        <div class="chart-decade-bar" style="height:${Math.round(n/maxD*68)+4}px" title="${n} álbuns"></div>
+        <div class="chart-decade-lbl">'${String(dec).slice(2)}</div>
+      </div>
+    `).join('')}
+  </div>
+  <div style="font-size:.6rem;color:var(--muted);text-align:center;letter-spacing:.03em;">${listened.filter(a=>a.year&&a.year!=='?').length} álbuns com data</div>`
+  : '<div class="chart-empty">Sem dados</div>'}
+</div>
+
+<div class="chart-card">
+  <div class="chart-card-title">Perfil de Obscuridade</div>
+  ${Object.entries(obscLevels).filter(([,n])=>n>0).map(([lvl,n])=>`
+    <div class="chart-bar-row">
+      <div class="chart-bar-label" style="color:${obscColors[lvl]}">${obscLabels[lvl]}</div>
+      <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${Math.round(n/maxO*100)}%;background:${obscColors[lvl]}"></div></div>
+      <div class="chart-bar-val">${n}</div>
+    </div>
+  `).join('') || '<div class="chart-empty">Sem dados</div>'}
+</div>
+
+<div class="chart-card">
+  <div class="chart-card-title">Países Explorados</div>
+  ${(()=>{
+    const cm={};
+    listened.filter(a=>a.country).forEach(a=>{ cm[a.country]=(cm[a.country]||0)+1; });
+    const top = Object.entries(cm).sort((a,b)=>b[1]-a[1]).slice(0,6);
+    const maxC = top[0]?.[1]||1;
+    return top.length ? top.map(([c,n])=>`
+      <div class="chart-bar-row">
+        <div class="chart-bar-label">${x(c)}</div>
+        <div class="chart-bar-track"><div class="chart-bar-fill" style="width:${Math.round(n/maxC*100)}%;background:var(--mb)"></div></div>
+        <div class="chart-bar-val">${n}</div>
+      </div>
+    `).join('') : '<div class="chart-empty">Sem dados de país</div>';
+  })()}
+</div>`;
+
+  // Animate bars after paint
+  requestAnimationFrame(()=>{
+    document.querySelectorAll('.chart-bar-fill').forEach(el=>{
+      el.style.transition='width .7s ease';
+    });
+  });
+}
+
+// ══════════════════════
+//  PWA
+// ══════════════════════
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', e=>{
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if(!localStorage.getItem('pwa_dismissed')){
+    setTimeout(()=>document.getElementById('pwa-banner').classList.add('visible'), 3000);
+  }
+});
+
+async function installPWA(){
+  if(!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const {outcome} = await deferredInstallPrompt.userChoice;
+  if(outcome==='accepted'){
+    document.getElementById('pwa-banner').classList.remove('visible');
+    deferredInstallPrompt = null;
+  }
+}
+
+function dismissPWA(){
+  document.getElementById('pwa-banner').classList.remove('visible');
+  localStorage.setItem('pwa_dismissed','1');
+}
+
+window.addEventListener('appinstalled', ()=>{
+  document.getElementById('pwa-banner').classList.remove('visible');
+});
+
+// Register service worker
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  });
+}
+
+// ║                SPINREC — CAMADA DE SERVIÇOS                  ║
+// ╠══════════════════════════════════════════════════════════════╣
+// ║  1. LastFmService   → descoberta por tag sem OAuth           ║
+// ║  2. MusicBrainzService → metadados abertos                   ║
+// ║  3. SpotifyService  → capas HD + link (PKCE OAuth)           ║
+// ║  4. DBService       → localStorage (→ Supabase)              ║
+// ╚══════════════════════════════════════════════════════════════╝
+
+// ═══════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════
+const SPOTIFY_CLIENT_ID = '1f4a9b64bd104af5a61fb610dffa78cd';
+
+// Last.fm — chave pública (pode ficar no frontend; sem dados privados)
+// TODO ao migrar para Next.js: mover para variável de ambiente LASTFM_API_KEY
+// e chamar via /api/lastfm para não expor a key
+const LASTFM_API_KEY = 'be2331260a3fb4f8d91e7a96bd4c5ebb'; // demo key — substitua pela sua
+
+// MusicBrainz — sem autenticação para leitura
+const MB_BASE = 'https://musicbrainz.org/ws/2';
+const LASTFM_BASE = 'https://ws.audioscrobbler.com/2.0';
+
+// ═══════════════════════════════════════
+//  SPOTIFY PKCE AUTH
+// ═══════════════════════════════════════
+let pathname = window.location.pathname;
+if(pathname.endsWith('index.html')) pathname = pathname.replace('index.html','');
+const REDIRECT_URI = window.location.origin + pathname + (pathname.endsWith('/') ? '' : '/');
+
+function rndStr(n){
+  const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  let s='';const a=new Uint8Array(n);crypto.getRandomValues(a);
+  a.forEach(b=>s+=c[b%c.length]);return s;
+}
+async function codeChallenge(v){
+  const d=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));
+  return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+async function startLogin(){
+  const v=rndStr(64);const ch=await codeChallenge(v);
+  sessionStorage.setItem('pkce_v',v);
+  location.href='https://accounts.spotify.com/authorize?'+new URLSearchParams({
+    response_type:'code',client_id:SPOTIFY_CLIENT_ID,scope:'user-read-private',
+    redirect_uri:REDIRECT_URI,code_challenge_method:'S256',code_challenge:ch
+  });
+}
+async function exchangeCode(code){
+  const v=sessionStorage.getItem('pkce_v');
+  if(!v) throw new Error('PKCE verifier missing');
+  const r=await fetch('https://accounts.spotify.com/api/token',{
+    method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:REDIRECT_URI,client_id:SPOTIFY_CLIENT_ID,code_verifier:v})
+  });
+  if(!r.ok){const t=await r.text();throw new Error('Token: '+t)}
+  saveTokens(await r.json());
+  sessionStorage.removeItem('pkce_v');
+  history.replaceState({},'',location.pathname);
+}
+async function refreshToken(){
+  const rt=localStorage.getItem('sp_rt');if(!rt)throw new Error('no refresh token');
+  const r=await fetch('https://accounts.spotify.com/api/token',{
+    method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:new URLSearchParams({grant_type:'refresh_token',refresh_token:rt,client_id:SPOTIFY_CLIENT_ID})
+  });
+  if(!r.ok) throw new Error('refresh failed');
+  saveTokens(await r.json());
+}
+function saveTokens(d){
+  localStorage.setItem('sp_at',d.access_token);
+  localStorage.setItem('sp_exp',Date.now()+(d.expires_in-60)*1000);
+  if(d.refresh_token) localStorage.setItem('sp_rt',d.refresh_token);
+}
+async function getAT(){
+  if(Date.now()<(+localStorage.getItem('sp_exp')||0)) return localStorage.getItem('sp_at');
+  await refreshToken();return localStorage.getItem('sp_at');
+}
+const loggedIn=()=>!!localStorage.getItem('sp_at');
+function doLogout(){['sp_at','sp_exp','sp_rt'].forEach(k=>localStorage.removeItem(k));syncAuthUI()}
+function handleAuth(){loggedIn()?doLogout():startLogin()}
+
+// ═══════════════════════════════════════
+//  SERVICE: LAST.FM
+//  Responsável: descoberta musical por tag/gênero
+//  Docs: https://www.last.fm/api
+//  TODO Next.js: chamar via /api/lastfm (server-side) p/ esconder API key
+// ═══════════════════════════════════════
+const LastFmService = {
+  /**
+   * Busca top álbuns de uma tag (gênero) no Last.fm
+   * @param {string} tag  - ex: "jazz", "bossa nova", "shoegaze"
+   * @param {number} page - paginação aleatória para variedade
+   * @returns {Array}     - lista de {name, artist, mbid, image, url, playcount}
+   */
+  async getTopAlbumsByTag(tag, page=1){
+    // Last.fm tag.getTopAlbums — sem OAuth, apenas API key
+    const url = `${LASTFM_BASE}/?method=tag.gettopalbums&tag=${encodeURIComponent(tag)}&api_key=${LASTFM_API_KEY}&format=json&limit=50&page=${page}`;
+    try {
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('Last.fm '+r.status);
+      const d = await r.json();
+      return (d.albums?.album || []).filter(a => a.name && a.artist?.name && a.name !== '(null)');
+    } catch(e) {
+      console.warn('[LastFm] falhou, usando fallback Spotify:', e.message);
+      return [];
+    }
+  },
+
+  /**
+   * Busca álbuns por artista no Last.fm
+   * @param {string} artist
+   * @returns {Array}
+   */
+  async getArtistAlbums(artist){
+    const url = `${LASTFM_BASE}/?method=artist.gettopalbums&artist=${encodeURIComponent(artist)}&api_key=${LASTFM_API_KEY}&format=json&limit=20`;
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      return (d.topalbums?.album || []);
+    } catch(e){ return []; }
+  },
+
+  /**
+   * Obtém info detalhada de um álbum via Last.fm
+   * Inclui: tags, wiki, playcount, listeners
+   */
+  async getAlbumInfo(artist, album){
+    const url = `${LASTFM_BASE}/?method=album.getinfo&artist=${encodeURIComponent(artist)}&album=${encodeURIComponent(album)}&api_key=${LASTFM_API_KEY}&format=json`;
+    try {
+      const r = await fetch(url);
+      const d = await r.json();
+      return d.album || null;
+    } catch(e){ return null; }
+  },
+
+  // Extrai a melhor imagem disponível do array de imagens do Last.fm
+  getBestImage(images){
+    if(!images || !images.length) return '';
+    const pref = ['extralarge','large','medium','small'];
+    for(const size of pref){
+      const img = images.find(i => i.size === size);
+      if(img && img['#text'] && img['#text'] !== '') return img['#text'];
+    }
+    return images[images.length-1]?.['#text'] || '';
+  }
+};
+
+// ═══════════════════════════════════════
+//  SERVICE: MUSICBRAINZ
+//  Responsável: metadados abertos (label, país, data, tracklist oficial)
+//  Docs: https://musicbrainz.org/doc/MusicBrainz_API
+//  Rate limit: 1 req/s — respeitar com delay
+//  TODO Next.js: cachear respostas no Supabase p/ evitar rate limit
+// ═══════════════════════════════════════
+const MusicBrainzService = {
+  _lastCall: 0,
+
+  // Garante delay mínimo de 1.1s entre chamadas (respeitar rate limit)
+  async _throttle(){
+    const now = Date.now();
+    const diff = now - this._lastCall;
+    if(diff < 1100) await new Promise(r => setTimeout(r, 1100 - diff));
+    this._lastCall = Date.now();
+  },
+
+  /**
+   * Busca release-group pelo nome do álbum + artista
+   * Retorna: mbid, tipo, data, label, país, tracklist
+   */
+  async searchRelease(albumName, artistName){
+    await this._throttle();
+    const q = encodeURIComponent(`release:"${albumName}" AND artist:"${artistName}"`);
+    const url = `${MB_BASE}/release?query=${q}&limit=5&fmt=json`;
+    try {
+      const r = await fetch(url, {headers:{'User-Agent':'SPINREC/1.0 (spinrec.app)'}});
+      if(!r.ok) return null;
+      const d = await r.json();
+      const releases = d.releases || [];
+      // Prefere release com mais informações
+      const best = releases.find(rel => rel['label-info']?.length > 0) || releases[0];
+      if(!best) return null;
+      return {
+        mbid: best.id,
+        date: best.date || '',
+        country: best.country || '',
+        label: best['label-info']?.[0]?.label?.name || '',
+        status: best.status || '',
+        trackCount: best['track-count'] || 0,
+        barcode: best.barcode || '',
+      };
+    } catch(e){
+      console.warn('[MusicBrainz] erro:', e.message);
+      return null;
+    }
+  },
+
+  /**
+   * Obtém tracklist oficial de um release pelo MBID
+   */
+  async getTracklist(mbid){
+    if(!mbid) return [];
+    await this._throttle();
+    try {
+      const r = await fetch(`${MB_BASE}/release/${mbid}?inc=recordings&fmt=json`, {
+        headers:{'User-Agent':'SPINREC/1.0 (spinrec.app)'}
+      });
+      if(!r.ok) return [];
+      const d = await r.json();
+      const media = d.media || [];
+      return media.flatMap(m => (m.tracks || []).map(t => ({
+        n: t.number,
+        name: t.title,
+        ms: t.length || 0
+      })));
+    } catch(e){ return []; }
+  }
+};
+
+// ═══════════════════════════════════════
+//  SERVICE: SPOTIFY
+//  Responsável: capas HD + link de escuta
+//  Docs: https://developer.spotify.com/documentation/web-api
+//  TODO Next.js: tokens gerenciados server-side via Supabase session
+// ═══════════════════════════════════════
+const SpotifyService = {
+  async fetch(path, retry=false){
+    if(!loggedIn()) return null; // Spotify é opcional
+    try {
+      const token = await getAT();
+      const r = await fetch('https://api.spotify.com/v1'+path, {
+        headers:{Authorization:'Bearer '+token}
+      });
+      if(r.status === 401){
+        if(retry) throw new Error('401 após refresh');
+        await refreshToken(); return this.fetch(path, true);
+      }
+      if(!r.ok) return null;
+      return r.json();
+    } catch(e){
+      console.warn('[Spotify] erro:', e.message);
+      return null;
+    }
+  },
+
+  /**
+   * Resolve capa em alta resolução + URL do álbum no Spotify
+   * Busca pelo nome do álbum + artista
+   * @returns {image, url} ou {image:'', url:''}
+   */
+  async resolveAlbum(albumName, artistName){
+    const q = `album:${albumName} artist:${artistName}`;
+    const d = await this.fetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=5&market=BR`);
+    if(!d) return {image:'', url:''};
+    const items = d.albums?.items || [];
+    const match = items.find(i =>
+      i.name.toLowerCase().includes(albumName.toLowerCase().substring(0,10))
+    ) || items[0];
+    if(!match) return {image:'', url:''};
+    return {
+      image: match.images?.[0]?.url || '',
+      url: match.external_urls?.spotify || '',
+      spotifyId: match.id,
+      tracks: [], // preenchido separadamente se necessário
+      totalTracks: match.total_tracks || 0,
+    };
+  },
+
+  /**
+   * Obtém tracklist completa de um álbum Spotify
+   */
+  async getTracklist(spotifyId){
+    if(!spotifyId) return [];
+    const d = await this.fetch(`/albums/${spotifyId}/tracks?limit=50&market=BR`);
+    if(!d) return [];
+    return (d.items || []).map(t => ({
+      n: t.track_number,
+      name: t.name,
+      ms: t.duration_ms || 0
+    }));
+  }
+};
+
+// ═══════════════════════════════════════
+//  SERVICE: DB (localStorage → Supabase)
+//  TODO: substituir por Supabase client
+//
+//  Migração para Supabase:
+//  import { createClient } from '@supabase/supabase-js'
+//  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+//  -- Tabelas: spinrec_history (user_id, album_id, rating, listened, ts)
+//              spinrec_albums  (id, name, artist, image, url, ...)
+// ═══════════════════════════════════════
+const DBService = {
+  KEY: 'spinrec4',
+  getHistory(){ try{return JSON.parse(localStorage.getItem(this.KEY)||'[]')}catch{return[]} },
+  saveHistory(h){ localStorage.setItem(this.KEY, JSON.stringify(h)) },
+  addAlbum(a){
+    let h=this.getHistory();
+    if(!h.find(x=>x.id===a.id)) h.unshift({...a,rating:0,listened:false,favorite:false,note:'',ts:Date.now()});
+    this.saveHistory(h);syncStats();
+  },
+  setListened(id,v){ let h=this.getHistory();const x=h.find(a=>a.id===id);if(x)x.listened=v;this.saveHistory(h);syncStats(); },
+  setRating(id,v){ let h=this.getHistory();const x=h.find(a=>a.id===id);if(x)x.rating=v;this.saveHistory(h);if(histOpen)renderHist(); },
+  setFavorite(id,v){ let h=this.getHistory();const x=h.find(a=>a.id===id);if(x)x.favorite=v;this.saveHistory(h);if(histOpen)renderHist(); },
+  setNote(id,v){ let h=this.getHistory();const x=h.find(a=>a.id===id);if(x)x.note=v;this.saveHistory(h); },
+  clear(){ if(!confirm('Limpar todo o histórico?'))return;localStorage.removeItem(this.KEY);syncStats();renderHist(); },
+};
+
+// ═══════════════════════════════════════
+//  COUNTRIES — tags Last.fm por região
+// ═══════════════════════════════════════
+const COUNTRIES = [
+  {l:'Qualquer',f:'🌍',q:''},
+  {l:'Japão',f:'🇯🇵',q:'japanese',tags:['japanese music','city pop','j-pop','japanese jazz','japanese rock','shibuya-kei']},
+  {l:'Brasil',f:'🇧🇷',q:'brazilian',tags:['mpb','bossa nova','samba','tropicália','baile funk','axé','forró']},
+  {l:'EUA',f:'🇺🇸',q:'american',tags:['classic rock','blues','soul','hip hop','country','americana','r&b']},
+  {l:'Reino Unido',f:'🇬🇧',q:'british',tags:['britpop','post-punk','brit rock','shoegaze','madchester','new wave']},
+  {l:'Alemanha',f:'🇩🇪',q:'german',tags:['krautrock','neue deutsche welle','german electronic','kosmische']},
+  {l:'Noruega',f:'🇳🇴',q:'norwegian',tags:['black metal','norwegian black metal','nordic folk']},
+  {l:'Jamaica',f:'🇯🇲',q:'jamaican',tags:['reggae','dub','dancehall','rocksteady','ska']},
+  {l:'Islândia',f:'🇮🇸',q:'icelandic',tags:['icelandic','nordic ambient','post-rock iceland']},
+  {l:'Mali',f:'🇲🇱',q:'malian',tags:['malian music','afrobeat mali','desert blues','wassoulou']},
+  {l:'Nigeria',f:'🇳🇬',q:'nigerian',tags:['afrobeat','highlife','jùjú','afropop']},
+  {l:'Cuba',f:'🇨🇺',q:'cuban',tags:['salsa','son cubano','rumba','nueva trova']},
+  {l:'Argentina',f:'🇦🇷',q:'argentinian',tags:['tango','rock nacional','folklore argentino']},
+  {l:'França',f:'🇫🇷',q:'french',tags:['chanson','french pop','french jazz','yé-yé','french electronic']},
+  {l:'Suécia',f:'🇸🇪',q:'swedish',tags:['swedish pop','abba','melodic death metal','swedish jazz']},
+  {l:'Etiópia',f:'🇪🇹',q:'ethiopian',tags:['ethiojazz','azmari','ethiopian music']},
+];
+
+let selCountry = COUNTRIES[0];
+let countryBtns = [];
+
+function buildCountries(){
+  const w = document.getElementById('country-grid');
+  if(!w) return;
+  w.innerHTML=''; countryBtns=[];
+  COUNTRIES.forEach((c,i)=>{
+    const b = document.createElement('button');
+    b.className = 'country-chip'+(i===0?' active':'');
+    b.innerHTML = `<span class="country-flag">${c.f}</span>${c.l}`;
+    b.onclick = ()=>{
+      countryBtns.forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      selCountry = c;
+    };
+    w.appendChild(b); countryBtns.push(b);
+  });
+}
+
+// ═══════════════════════════════════════
+//  OBSCURITY SCORE
+// ═══════════════════════════════════════
+function calcObscurityScore(popularity){
+  // popularity = Last.fm playcount
+  if(popularity >= 2000000) return {level:'mainstream',label:'Mainstream',score:15};
+  if(popularity >= 200000)  return {level:'cult',label:'Cult',score:45};
+  if(popularity >= 20000)   return {level:'obscure',label:'Obscuro',score:72};
+  return {level:'ultra',label:'Ultra Obscuro',score:92};
+}
+
+function renderObscurityBadge(popularity){
+  const o = calcObscurityScore(popularity);
+  const icons = {mainstream:'📊',cult:'🔥',obscure:'🕳',ultra:'💀'};
+  return `<div class="obscurity-wrap">
+    <span class="obscurity-badge ${o.level}">${icons[o.level]} ${o.label}</span>
+    <div class="obscurity-bar"><div class="obscurity-fill" style="width:${o.score}%;background:${o.level==='mainstream'?'#1DB954':o.level==='cult'?'var(--accent)':o.level==='obscure'?'#e67e22':'#e74c3c'}"></div></div>
+    <span class="obscurity-score-num">${fmtNum(popularity)} plays</span>
+  </div>`;
+}
+
+// ═══════════════════════════════════════
+//  ALBUM PAGE MODAL
+// ═══════════════════════════════════════
+function openAlbumPage(a){
+  const modal = document.getElementById('album-modal');
+  const content = document.getElementById('album-modal-content');
+  const o = calcObscurityScore(a.popularity);
+  const countryDisplay = a.country ? `<span class="country-origin-badge">${a.country}</span>` : '';
+
+  content.innerHTML = `
+<div class="album-page">
+  <div>
+    <div class="album-page-cover">
+      <img src="${x(a.image)||'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23141414%22 width=%22200%22 height=%22200%22/%3E%3Ctext fill=%22%236a6560%22 font-size=%2248%22 text-anchor=%22middle%22 x=%22100%22 y=%22115%22%3E♪%3C/text%3E%3C/svg%3E'}" alt="${x(a.name)}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23141414%22 width=%22200%22 height=%22200%22/%3E%3Ctext fill=%22%236a6560%22 font-size=%2248%22 text-anchor=%22middle%22 x=%22100%22 y=%22115%22%3E♪%3C/text%3E%3C/svg%3E'">
+      <div class="album-page-cover-shadow"></div>
+    </div>
+    ${renderObscurityBadge(a.popularity)}
+    <div style="margin-top:14px">
+      ${a.url?`<a class="btn btn-spotify" style="display:inline-flex;margin-bottom:6px" href="${x(a.url)}" target="_blank" rel="noopener">▶ Ouvir no Spotify</a>`:''}
+      ${a.lastfmUrl?`<a class="btn btn-lastfm" style="display:inline-flex" href="${x(a.lastfmUrl)}" target="_blank" rel="noopener">◉ Ver no Last.fm</a>`:''}
+    </div>
+  </div>
+  <div class="album-page-right">
+    <div>
+      <div class="album-page-title">${x(a.name)}</div>
+      <div class="album-page-artist">${x(a.artist)}${countryDisplay}</div>
+      <div class="album-page-meta">
+        <span class="apm-tag">${a.year}</span>
+        ${a.totalTracks?`<span class="apm-tag">${a.totalTracks} faixas</span>`:''}
+        ${a.durationMin?`<span class="apm-tag">${a.durationMin} min</span>`:''}
+        ${(a.genres||[]).map(g=>`<span class="apm-tag">${x(g)}</span>`).join('')}
+        ${a.label?`<span class="apm-tag">${x(a.label)}</span>`:''}
+      </div>
+      ${a.mbid?`<div class="mb-info" style="margin-top:8px">MBID: <span>${a.mbid.substring(0,18)}…</span></div>`:''}
+    </div>
+    <div>
+      <div class="album-page-section-title">Tracklist</div>
+      <div class="album-page-full-tracklist album-page-tracklist">
+        ${a.tracks.map(t=>`<div class="apt-row"><span class="apt-num">${t.n}</span><span class="apt-name">${x(t.name)}</span><span class="apt-dur">${fmt(t.ms)}</span></div>`).join('')}
+      </div>
+    </div>
+  </div>
+</div>`;
+  modal.classList.add('open');
+  document.body.style.overflow='hidden';
+}
+
+function closeAlbumPage(){
+  document.getElementById('album-modal').classList.remove('open');
+  document.body.style.overflow='';
+}
+document.getElementById('album-modal').addEventListener('click',function(e){
+  if(e.target===this) closeAlbumPage();
+});
+
+// ═══════════════════════════════════════
+//  COLLECTION & BADGES SYSTEM
+// ═══════════════════════════════════════
+const BADGE_DEFS = [
+  // Escutas
+  {id:'first_spin',icon:'🎯',name:'Primeiro Giro',desc:'Descobriu seu primeiro álbum',req:h=>h.length>=1,type:'count',target:1,getValue:h=>h.length},
+  {id:'ten_albums',icon:'📀',name:'Colecionador',desc:'10 álbuns no histórico',req:h=>h.length>=10,type:'count',target:10,getValue:h=>h.length},
+  {id:'fifty_albums',icon:'🗃',name:'Arquivista',desc:'50 álbuns no histórico',req:h=>h.length>=50,type:'count',target:50,getValue:h=>h.length},
+  // Escutados
+  {id:'listen_5',icon:'🎧',name:'Fone de Ouvido',desc:'Marcou 5 álbuns como escutados',req:h=>h.filter(a=>a.listened).length>=5,type:'count',target:5,getValue:h=>h.filter(a=>a.listened).length},
+  {id:'listen_20',icon:'🎵',name:'Maratonista',desc:'Marcou 20 álbuns como escutados',req:h=>h.filter(a=>a.listened).length>=20,type:'count',target:20,getValue:h=>h.filter(a=>a.listened).length},
+  {id:'listen_50',icon:'🏅',name:'Veterano',desc:'50 álbuns escutados. Respeito.',req:h=>h.filter(a=>a.listened).length>=50,type:'count',target:50,getValue:h=>h.filter(a=>a.listened).length},
+  // Décadas
+  {id:'decade_70s',icon:'🕺',name:'Anos 70',desc:'Ouviu 5 álbuns da década de 70',req:h=>h.filter(a=>a.listened&&a.year>='1970'&&a.year<='1979').length>=5,type:'decade',target:5,getValue:h=>h.filter(a=>a.listened&&a.year>='1970'&&a.year<='1979').length},
+  {id:'decade_80s',icon:'📼',name:'Anos 80',desc:'Ouviu 5 álbuns da década de 80',req:h=>h.filter(a=>a.listened&&a.year>='1980'&&a.year<='1989').length>=5,type:'decade',target:5,getValue:h=>h.filter(a=>a.listened&&a.year>='1980'&&a.year<='1989').length},
+  {id:'decade_90s',icon:'📼',name:'Anos 90',desc:'Ouviu 5 álbuns da década de 90',req:h=>h.filter(a=>a.listened&&a.year>='1990'&&a.year<='1999').length>=5,type:'decade',target:5,getValue:h=>h.filter(a=>a.listened&&a.year>='1990'&&a.year<='1999').length},
+  {id:'decade_2000s',icon:'💿',name:'Anos 2000',desc:'Ouviu 5 álbuns dos anos 2000',req:h=>h.filter(a=>a.listened&&a.year>='2000'&&a.year<='2009').length>=5,type:'decade',target:5,getValue:h=>h.filter(a=>a.listened&&a.year>='2000'&&a.year<='2009').length},
+  // Gêneros (via tag)
+  {id:'jazz_lover',icon:'🎷',name:'Jazzista',desc:'Escutou 3 álbuns de jazz',req:h=>h.filter(a=>a.listened&&(a.genres||[]).some(g=>g.toLowerCase().includes('jazz'))).length>=3,type:'genre',target:3,getValue:h=>h.filter(a=>a.listened&&(a.genres||[]).some(g=>g.toLowerCase().includes('jazz'))).length},
+  {id:'metal_head',icon:'🤘',name:'Cabeça de Metal',desc:'Escutou 3 álbuns de metal',req:h=>h.filter(a=>a.listened&&(a.genres||[]).some(g=>g.toLowerCase().includes('metal'))).length>=3,type:'genre',target:3,getValue:h=>h.filter(a=>a.listened&&(a.genres||[]).some(g=>g.toLowerCase().includes('metal'))).length},
+  {id:'electronica',icon:'🎛',name:'Eletro-viciado',desc:'Escutou 3 álbuns eletrônicos',req:h=>h.filter(a=>a.listened&&(a.genres||[]).some(g=>['electronic','ambient','techno','house','idm'].some(x=>g.toLowerCase().includes(x)))).length>=3,type:'genre',target:3,getValue:h=>h.filter(a=>a.listened&&(a.genres||[]).some(g=>['electronic','ambient','techno','house','idm'].some(x=>g.toLowerCase().includes(x)))).length},
+  // Obscuridade
+  {id:'digger',icon:'🕳',name:'Crate Digger',desc:'Encontrou 3 álbuns ultra obscuros',req:h=>h.filter(a=>a.listened&&parseInt(a.popularity||0)<20000).length>=3,type:'obscurity',target:3,getValue:h=>h.filter(a=>a.listened&&parseInt(a.popularity||0)<20000).length},
+  {id:'globetrotter',icon:'🌍',name:'Globetrotter',desc:'Descobriu música de 3 países diferentes',req:h=>{const countries=new Set(h.filter(a=>a.listened&&a.country).map(a=>a.country));return countries.size>=3},type:'world',target:3,getValue:h=>{const countries=new Set(h.filter(a=>a.listened&&a.country).map(a=>a.country));return countries.size}},
+  // Avaliações
+  {id:'critic',icon:'⭐',name:'Crítico Musical',desc:'Avaliou 10 álbuns com nota',req:h=>h.filter(a=>a.rating>0).length>=10,type:'rating',target:10,getValue:h=>h.filter(a=>a.rating>0).length},
+  {id:'note_taker',icon:'📝',name:'Jornalista',desc:'Escreveu notas em 5 álbuns',req:h=>h.filter(a=>a.note&&a.note.trim().length>0).length>=5,type:'note',target:5,getValue:h=>h.filter(a=>a.note&&a.note.trim().length>0).length},
+  // Brasil
+  {id:'brasil_soul',icon:'🇧🇷',name:'Alma Brasileira',desc:'Escutou 3 álbuns de MPB/Samba/Bossa',req:h=>h.filter(a=>a.listened&&(a.genres||[]).some(g=>['mpb','samba','bossa','tropicália','baile'].some(x=>g.toLowerCase().includes(x)))).length>=3,type:'country_genre',target:3,getValue:h=>h.filter(a=>a.listened&&(a.genres||[]).some(g=>['mpb','samba','bossa','tropicália','baile'].some(x=>g.toLowerCase().includes(x)))).length},
+];
+
+let prevEarnedBadges = new Set();
+
+function checkBadges(showToasts=false){
+  const h = DBService.getHistory();
+  const earned = new Set(BADGE_DEFS.filter(b=>b.req(h)).map(b=>b.id));
+  if(showToasts){
+    earned.forEach(id=>{
+      if(!prevEarnedBadges.has(id)){
+        const badge = BADGE_DEFS.find(b=>b.id===id);
+        if(badge) showBadgeToast(badge);
+      }
+    });
+  }
+  prevEarnedBadges = earned;
+  return earned;
+}
+
+function showBadgeToast(badge){
+  const t = document.createElement('div');
+  t.className='new-badge-toast';
+  t.innerHTML=`<span class="toast-icon">${badge.icon}</span><div class="toast-text"><strong>🏆 Nova conquista!</strong>${badge.name} — ${badge.desc}</div>`;
+  document.body.appendChild(t);
+  setTimeout(()=>t.style.opacity='0',3500);
+  setTimeout(()=>t.remove(),4000);
+}
+
+let collOpen = false;
+function toggleCollection(){
+  collOpen = !collOpen;
+  document.getElementById('collection-section').classList.toggle('open', collOpen);
+  document.getElementById('coll-btn').classList.toggle('active', collOpen);
+  if(collOpen) renderCollection();
+}
+
+function renderCollection(){
+  const h = DBService.getHistory();
+  const earned = checkBadges(false);
+
+  // Stats
+  const listenedCount = h.filter(a=>a.listened).length;
+  const genres = new Set(h.filter(a=>a.listened).flatMap(a=>a.genres||[]));
+  const countries = new Set(h.filter(a=>a.listened&&a.country).map(a=>a.country));
+  const decades = new Set(h.filter(a=>a.listened&&a.year&&a.year!=='?').map(a=>a.year.substring(0,3)+'0s'));
+  const avgRating = h.filter(a=>a.rating>0).reduce((s,a)=>s+a.rating,0) / (h.filter(a=>a.rating>0).length||1);
+
+  document.getElementById('coll-stats').innerHTML=`
+    <div class="coll-stat"><span class="coll-stat-num">${h.length}</span><span class="coll-stat-label">Álbuns Descobertos</span></div>
+    <div class="coll-stat"><span class="coll-stat-num">${listenedCount}</span><span class="coll-stat-label">Escutados</span></div>
+    <div class="coll-stat"><span class="coll-stat-num">${genres.size}</span><span class="coll-stat-label">Gêneros Explorados</span></div>
+    <div class="coll-stat"><span class="coll-stat-num">${countries.size}</span><span class="coll-stat-label">Países</span></div>
+    <div class="coll-stat"><span class="coll-stat-num">${decades.size}</span><span class="coll-stat-label">Décadas</span></div>
+    <div class="coll-stat"><span class="coll-stat-num">${h.filter(a=>a.rating>0).length?avgRating.toFixed(1):'—'}</span><span class="coll-stat-label">Nota Média</span></div>
+  `;
+
+  document.getElementById('badges-grid').innerHTML = BADGE_DEFS.map(b=>{
+    const isEarned = earned.has(b.id);
+    const val = b.getValue(h);
+    const pct = Math.min(100, Math.round(val/b.target*100));
+    return `<div class="badge-card ${isEarned?'earned':'locked'}">
+      <div class="badge-icon">${b.icon}</div>
+      <div class="badge-info">
+        <div class="badge-name">${b.name}</div>
+        <div class="badge-desc">${b.desc}</div>
+        ${isEarned?'<div class="badge-earned-label">✓ Conquistado</div>':
+          `<div class="badge-progress"><div class="badge-progress-fill" style="width:${pct}%"></div></div>
+           <div class="badge-earned-label" style="color:var(--muted)">${val}/${b.target}</div>`}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Render charts
+  renderCollectionCharts();
+}
+const GENRES=[
+  {l:'🎲 Aleatório',q:''},
+  {l:'Rock',q:'rock'},{l:'Jazz',q:'jazz'},{l:'Hip-Hop',q:'hip hop'},
+  {l:'Eletrônico',q:'electronic'},{l:'Pop',q:'pop'},{l:'Soul / R&B',q:'soul'},
+  {l:'Metal',q:'metal'},{l:'Folk / Indie',q:'indie'},{l:'Clássico',q:'classical'},
+  {l:'Blues',q:'blues'},{l:'Country',q:'country'},{l:'Reggae',q:'reggae'},
+  {l:'Funk',q:'funk'},{l:'Punk',q:'punk'},{l:'Alternativo',q:'alternative'},
+  {l:'Bossa Nova',q:'bossa nova'},{l:'Samba',q:'samba'},{l:'MPB',q:'mpb'},
+  {l:'Forró',q:'forro'},{l:'Sertanejo',q:'sertanejo'},{l:'Pagode',q:'pagode'},
+  {l:'Gospel',q:'gospel'},{l:'Ambient',q:'ambient'},{l:'Lo-fi',q:'lo-fi'},
+  {l:'Grunge',q:'grunge'},{l:'New Wave',q:'new wave'},{l:'Disco',q:'disco'},
+  {l:'Trap',q:'trap'},{l:'K-Pop',q:'k-pop'},{l:'Post-Rock',q:'post-rock'},
+  {l:'Progressive',q:'progressive rock'},{l:'Shoegaze',q:'shoegaze'},
+  {l:'Drill',q:'drill'},{l:'Psychedelic',q:'psychedelic'},
+];
+const FALLBACK_TAGS=['rock','jazz','electronic','pop','soul','indie','blues'];
+let selGenre=GENRES[0],genreBtns=[];
+
+function buildGenres(){
+  const w=document.getElementById('genre-chips');w.innerHTML='';genreBtns=[];
+  GENRES.forEach((g,i)=>{
+    const b=document.createElement('button');
+    b.className='chip'+(i===0?' active':'');
+    b.textContent=g.l;
+    b.onclick=()=>{genreBtns.forEach(x=>x.classList.remove('active'));b.classList.add('active');selGenre=g};
+    w.appendChild(b);genreBtns.push(b);
+  });
+}
+function filterGenres(v){const q=v.toLowerCase();genreBtns.forEach(b=>{b.style.display=(!q||b.textContent.toLowerCase().includes(q))?'':'none'})}
+
+// ═══════════════════════════════════════
+//  FILTER STATE
+// ═══════════════════════════════════════
+let F={durMin:0,durMax:9999,type:'',eraFrom:1900,eraTo:2099,excl:false};
+function pick(el,g){
+  document.querySelectorAll('#'+g+'-chips .chip').forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  if(g==='dur'){F.durMin=+el.dataset.min;F.durMax=+el.dataset.max}
+  if(g==='type')F.type=el.dataset.val;
+  if(g==='era'){F.eraFrom=+el.dataset.from;F.eraTo=+el.dataset.to}
+}
+function toggleExcl(el){F.excl=!F.excl;el.classList.toggle('active',F.excl)}
+
+// ═══════════════════════════════════════
+//  LOADING STEPS UI
+// ═══════════════════════════════════════
+function setStep(n){
+  ['ls1','ls2','ls3'].forEach((id,i)=>{
+    const el=document.getElementById(id);
+    if(!el)return;
+    el.classList.remove('active','done');
+    if(i+1<n) el.classList.add('done');
+    else if(i+1===n) el.classList.add('active');
+  });
+}
+
+// ═══════════════════════════════════════
+//  SPIN — ORQUESTRADOR PRINCIPAL
+//  Fluxo: Last.fm → filtros → MusicBrainz → Spotify
+// ═══════════════════════════════════════
+let spins=0,curAlbum=null;
+
+async function spin(){
+  document.getElementById('spin-btn').disabled=true;
+  document.getElementById('refine-section').style.display='none';
+  const advBadge = document.getElementById('adventure-badge-wrap');
+  if(advBadge) advBadge.innerHTML='';
+  showLoad(true);hideRes();
+  try {
+    const album = await fetchAlbumMultiSource();
+    if(!album){showErr('Nenhum álbum encontrado com esses filtros. Tente ampliar os critérios.');return}
+    curAlbum=album;spins++;
+    document.getElementById('stat-spins').textContent=spins;
+    DBService.addAlbum(album);
+    checkBadges(true);
+    renderCard(album);
+    document.getElementById('result-section').style.display='block';
+    document.getElementById('result-section').scrollIntoView({behavior:'smooth',block:'start'});
+  } catch(e){
+    console.error(e);
+    showErr('Erro ao buscar álbum.<br><small style="font-size:.65rem;opacity:.6">'+e.message+'</small>');
+  } finally {
+    showLoad(false);
+    document.getElementById('spin-btn').disabled=false;
+  }
+}
+
+/**
+ * Orquestra os 3 serviços para montar um álbum completo:
+ * 1. Last.fm  → lista de candidatos pelo gênero
+ * 2. Filtra por época, tipo, exclusões
+ * 3. MusicBrainz → metadados (label, país, tracklist)
+ * 4. Spotify  → capa HD + link (se logado)
+ */
+async function fetchAlbumMultiSource(){
+  const h = DBService.getHistory();
+  const listenedIds = h.filter(a=>a.listened).map(a=>a.id);
+  const histIds = h.map(a=>a.id);
+
+  // ① LAST.FM — descoberta
+  setStep(1);setPill('lastfm',true);
+  // Combina gênero + país: ex: "jazz" + Japão → "japanese jazz" se disponível
+  let tag;
+  if(selCountry.q && selGenre.q){
+    // Tenta tag combinada primeiro, depois fallback para país genérico
+    const countryTags = selCountry.tags || [];
+    const genreTag = selGenre.q;
+    // Procura tag que contenha ambos
+    const combined = countryTags.find(t=>t.includes(genreTag.split(' ')[0]));
+    tag = combined || rnd([...countryTags, genreTag]);
+  } else if(selCountry.q){
+    tag = rnd(selCountry.tags || [selCountry.q]);
+  } else {
+    tag = selGenre.q || rnd(FALLBACK_TAGS);
+  }
+  const page = Math.floor(Math.random()*4)+1; // paginação aleatória para variedade
+  let candidates = await LastFmService.getTopAlbumsByTag(tag, page);
+
+  // Fallback: se Last.fm falhar, tenta tag genérica
+  if(!candidates.length && selGenre.q){
+    candidates = await LastFmService.getTopAlbumsByTag(rnd(FALLBACK_TAGS), 1);
+  }
+  if(!candidates.length) throw new Error('Last.fm não retornou álbuns para esta tag');
+  setPill('lastfm',false);
+
+  // Filtra por época e tipo (Last.fm não tem esses filtros nativos)
+  // OBS: Last.fm não fornece ano direto no getTopAlbums — filtramos depois via MusicBrainz
+  // Embaralha para variedade
+  let pool = shuffle([...candidates]);
+  if(F.excl) pool = pool.filter(a => !listenedIds.includes(lfmId(a)));
+
+  // ② MUSICBRAINZ — metadados + filtros de época/duração
+  setStep(2);setPill('mb',true);
+  for(let i=0; i<Math.min(pool.length,8); i++){
+    const candidate = pool[i];
+    const albumName = candidate.name;
+    const artistName = candidate.artist?.name || candidate.artist || '';
+    if(!albumName || !artistName) continue;
+
+    // Busca metadados no MusicBrainz
+    const mbData = await MusicBrainzService.searchRelease(albumName, artistName);
+
+    // Filtro de época via MusicBrainz
+    if(mbData?.date){
+      const year = parseInt(mbData.date.substring(0,4));
+      if(year < F.eraFrom || year > F.eraTo) continue;
+    }
+
+    // ③ SPOTIFY — capa + link + tracklist
+    setStep(3);setPill('spotify',true);
+    const spData = await SpotifyService.resolveAlbum(albumName, artistName);
+
+    // Tracklist: preferência Spotify > MusicBrainz > Last.fm
+    let tracks = [];
+    let totalMin = 0;
+    if(spData?.spotifyId){
+      tracks = await SpotifyService.getTracklist(spData.spotifyId);
+    }
+    if(!tracks.length && mbData?.mbid){
+      tracks = await MusicBrainzService.getTracklist(mbData.mbid);
+    }
+    // Calcula duração
+    if(tracks.length){
+      totalMin = Math.round(tracks.reduce((s,t)=>s+(t.ms||0),0)/60000);
+    } else {
+      // Last.fm tem duração em segundos em alguns casos
+      totalMin = Math.round((candidate.duration||0)/60) || 0;
+    }
+    // Filtro de duração (só aplica se tivermos dados)
+    if(totalMin>0 && (totalMin<F.durMin || totalMin>F.durMax)) {
+      setPill('spotify',false);
+      continue;
+    }
+
+    setPill('mb',false);setPill('spotify',false);
+
+    // Monta objeto normalizado
+    const year = mbData?.date ? mbData.date.substring(0,4)
+                : (candidate.wiki?.published || '').substring(0,4) || '?';
+    const image = spData?.image || LastFmService.getBestImage(candidate.image) || '';
+    const id = spData?.spotifyId || mbData?.mbid || lfmId(candidate);
+
+    // Pula álbuns já no histórico (exceto se pool esgotado)
+    if(histIds.includes(id) && i < pool.length-1) continue;
+
+    return {
+      id,
+      name: albumName,
+      artist: artistName,
+      year,
+      type: F.type || 'album',
+      tracks: tracks.length ? tracks : [{n:1,name:'Tracklist indisponível',ms:0}],
+      totalTracks: tracks.length || candidate.tracks?.track?.length || 0,
+      durationMin: totalMin,
+      image,
+      genres: (candidate.tags?.tag || []).map(t=>t.name).slice(0,3),
+      popularity: parseInt(candidate.playcount||0),
+      url: spData?.url || candidate.url || '',
+      lastfmUrl: candidate.url || '',
+      label: mbData?.label || '',
+      country: mbData?.country || '',
+      mbid: mbData?.mbid || '',
+      // Flags de fonte para exibição
+      _sources: {
+        lastfm: true,
+        mb: !!mbData,
+        spotify: !!(spData?.image || spData?.url),
+      }
+    };
+  }
+  return null;
+}
+
+// Gera um ID único para álbum Last.fm (sem Spotify ID)
+function lfmId(a){ return 'lfm_'+btoa(encodeURIComponent((a.artist?.name||'')+'-'+(a.name||''))).replace(/[^a-zA-Z0-9]/g,'').substring(0,24); }
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]]}return arr}
+function rnd(arr){return arr[Math.floor(Math.random()*arr.length)]}
+
+// ═══════════════════════════════════════
+//  RENDER CARD
+// ═══════════════════════════════════════
+function renderCard(a, adventureMode){
+  const h=DBService.getHistory();const e=h.find(x=>x.id===a.id)||{};
+  const r=e.rating||0;const lis=e.listened||false;const fav=e.favorite||false;const note=e.note||'';
+  const tl=a.type==='album'?'ÁLBUM':a.type==='single'?'SINGLE/EP':(a.type||'ÁLBUM').toUpperCase();
+  const gs=a.genres.length?a.genres.slice(0,2).join(' · '):selGenre.l||'';
+  const sources = a._sources||{};
+
+  // Adventure badge
+  const advBadgeWrap = document.getElementById('adventure-badge-wrap');
+  if(adventureMode && advBadgeWrap){
+    const labels={challenge:'🎯 Modo Desafio',different:'🌍 Totalmente Diferente',cult:'🖤 Álbum Cult',classic:'🏆 Clássico Obrigatório',underground:'🕳 Underground',random:'🎲 Roleta Total'};
+    advBadgeWrap.innerHTML=`<div class="adventure-indicator">${labels[adventureMode]||adventureMode}</div>`;
+  } else if(advBadgeWrap){ advBadgeWrap.innerHTML=''; }
+
+  document.getElementById('card-wrap').innerHTML=`
+<div class="data-sources">
+  ${sources.lastfm?'<span class="ds-badge lastfm">Last.fm</span>':''}
+  ${sources.mb?'<span class="ds-badge mb">MusicBrainz</span>':''}
+  ${sources.spotify?'<span class="ds-badge spotify">Spotify</span>':''}
+</div>
+<div class="album-card">
+  <div class="cover-wrap">
+    <img src="${x(a.image)||'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23141414%22 width=%22200%22 height=%22200%22/%3E%3Ctext fill=%22%236a6560%22 font-size=%2248%22 text-anchor=%22middle%22 x=%22100%22 y=%22115%22%3E♪%3C/text%3E%3C/svg%3E'}" alt="${x(a.name)}" loading="lazy"
+      onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 200 200%22%3E%3Crect fill=%22%23141414%22 width=%22200%22 height=%22200%22/%3E%3Ctext fill=%22%236a6560%22 font-size=%2248%22 text-anchor=%22middle%22 x=%22100%22 y=%22115%22%3E♪%3C/text%3E%3C/svg%3E'">
+    <div class="vinyl-shadow"></div>
+    <span class="type-badge">${tl}</span>
+  </div>
+  <div class="album-info">
+    <div class="album-info-top">
+      <div class="album-genre">${x(gs)}</div>
+      <div class="album-title">${x(a.name)}</div>
+      <div class="album-artist">${x(a.artist)}</div>
+      <div class="album-meta">
+        <span><span class="dot"></span>${a.year}</span>
+        ${a.totalTracks?`<span><span class="dot"></span>${a.totalTracks} faixas</span>`:''}
+        ${a.durationMin?`<span><span class="dot"></span>${a.durationMin} min</span>`:''}
+        ${a.label?`<span><span class="dot"></span>${x(a.label)}</span>`:''}
+        ${a.country?`<span><span class="dot"></span>${x(a.country)}</span>`:''}
+      </div>
+      ${a.popularity>0?renderObscurityBadge(a.popularity):''}
+      ${a.mbid?`<div class="mb-info">MBID: <span>${a.mbid.substring(0,18)}…</span></div>`:''}
+    </div>
+    <div>
+      <div class="rating-section">
+        <div class="rating-label-text">Sua avaliação</div>
+        ${starWidget(a.id,r)}
+      </div>
+      <div class="album-actions">
+        <button class="btn btn-listen${lis?' marked':''}" id="bl-${a.id}" onclick="togLis('${a.id}',this)">
+          ${lis?'✓ Escutado':'+ Marcar como escutado'}
+        </button>
+        <button class="btn btn-fav${fav?' active':''}" id="bf-${a.id}" onclick="togFav('${a.id}',this)">
+          ${fav?'★ Favorito':'☆ Favoritar'}
+        </button>
+        <button class="btn" onclick="openAlbumPage(curAlbum)" style="border-color:var(--info);color:var(--info)">⊞ Página do Álbum</button>
+        ${a.url?`<a class="btn btn-spotify" href="${x(a.url)}" target="_blank" rel="noopener">▶ Spotify</a>`:''}
+        ${a.lastfmUrl?`<a class="btn btn-lastfm" href="${x(a.lastfmUrl)}" target="_blank" rel="noopener">◉ Last.fm</a>`:''}
+        <button class="btn btn-again" onclick="spin()">⟳ Outro álbum</button>
+        ${a._artistMode ? `<button class="btn" style="border-color:#9b59b6;color:#9b59b6" onclick="spinBySpecificArtist('${x(a.artist)}')">⟳ Mais de ${x(a.artist)}</button>` : ''}
+        <button class="btn btn-wishlist${WishlistService.has(a.id)?' in-wishlist':''}" id="bw-${a.id}" onclick="togWish('${a.id}',this)">
+          ${WishlistService.has(a.id)?'🔖 Na wishlist':'🔖 Quero ouvir'}
+        </button>
+        <button class="btn btn-share" onclick="openShareModal(curAlbum)">↗ Compartilhar</button>
+      </div>
+      <div class="note-section">
+        <div class="note-label">Nota pessoal</div>
+        <textarea class="note-input" id="note-${a.id}" placeholder="O que você achou? Lembranças, contexto…" rows="2">${x(note)}</textarea>
+        <div style="display:flex;align-items:center">
+          <button class="note-save-btn" onclick="saveNote('${a.id}')">Salvar nota</button>
+          <span class="note-saved" id="ns-${a.id}">✓ salvo</span>
+        </div>
+      </div>
+      <div class="tracklist-section">
+        <button class="tl-toggle" onclick="togTL(this)"><span class="tl-arrow">▶</span> Ver tracklist</button>
+        <div class="track-list">
+          ${a.tracks.map(t=>`<div class="track-row"><span class="track-num">${t.n}</span><span class="track-name">${x(t.name)}</span><span class="track-dur">${fmt(t.ms)}</span></div>`).join('')}
+        </div>
+      </div>
+      <div class="similar-section">
+        <div class="similar-label">Artistas similares</div>
+        <div class="similar-artists" id="similar-artists-wrap"><span class="similar-loading">—</span></div>
+      </div>
+    </div>
+  </div>
+</div>`;
+
+  // Show refine section
+  document.getElementById('refine-section').style.display='block';
+
+  // Load similar artists async
+  if(a.artist) loadSimilarArtists(a.artist);
+}
+
+// ═══════════════════════════════════════
+//  STAR WIDGET
+// ═══════════════════════════════════════
+function starWidget(id,cur){
+  let h=`<div class="stars-container" id="sc-${id}">`;
+  for(let i=1;i<=5;i++){
+    const c=cur>=i?'full':cur>=i-.5?'half':'';
+    h+=`<div class="star-unit ${c}" id="su-${id}-${i}">
+      <div class="star-bg">★</div><div class="star-fl">★</div><div class="star-fr">★</div>
+      <div class="star-left" onmouseover="pvw('${id}',${i-.5})" onmouseout="rstPvw('${id}')" onclick="commitR('${id}',${i-.5})"></div>
+      <div class="star-right" onmouseover="pvw('${id}',${i})" onmouseout="rstPvw('${id}')" onclick="commitR('${id}',${i})"></div>
+    </div>`;
+  }
+  h+=`<span class="rating-val" id="rv-${id}">${cur?cur.toFixed(1):'—'}</span></div>`;
+  return h;
+}
+function pvw(id,v){setStar(id,v);const el=document.getElementById('rv-'+id);if(el)el.textContent=v.toFixed(1)}
+function rstPvw(id){const h=DBService.getHistory();const e=h.find(a=>a.id===id);const r=e?e.rating:0;setStar(id,r);const el=document.getElementById('rv-'+id);if(el)el.textContent=r?r.toFixed(1):'—'}
+function commitR(id,v){DBService.setRating(id,v);pvw(id,v)}
+function setStar(id,v){for(let i=1;i<=5;i++){const u=document.getElementById(`su-${id}-${i}`);if(!u)continue;u.classList.remove('full','half');if(v>=i)u.classList.add('full');else if(v>=i-.5)u.classList.add('half')}}
+function togLis(id,btn){const h=DBService.getHistory();const e=h.find(a=>a.id===id);const nv=e?!e.listened:true;DBService.setListened(id,nv);btn.textContent=nv?'✓ Escutado':'+ Marcar como escutado';btn.classList.toggle('marked',nv);checkBadges(true);if(histOpen)renderHist()}
+function togTL(btn){const l=btn.nextElementSibling;l.classList.toggle('open');const o=l.classList.contains('open');btn.querySelector('.tl-arrow').textContent=o?'▼':'▶';btn.childNodes[1].textContent=o?' Ocultar tracklist':' Ver tracklist'}
+
+function togFav(id,btn){const h=DBService.getHistory();const e=h.find(a=>a.id===id);const nv=e?!e.favorite:true;DBService.setFavorite(id,nv);btn.textContent=nv?'★ Favorito':'☆ Favoritar';btn.classList.toggle('active',nv);if(histOpen)renderHist()}
+function togWish(id,btn){
+  const inWish = WishlistService.has(id);
+  if(inWish){
+    WishlistService.remove(id);
+    btn.textContent='🔖 Quero ouvir';btn.classList.remove('in-wishlist');
+  } else {
+    const a = curAlbum||(DBService.getHistory().find(x=>x.id===id));
+    if(a) WishlistService.add(a);
+    btn.textContent='🔖 Na wishlist';btn.classList.add('in-wishlist');
+  }
+  if(wishOpen) renderWishlist();
+}
+function saveNote(id){const el=document.getElementById('note-'+id);if(!el)return;DBService.setNote(id,el.value);const ns=document.getElementById('ns-'+id);if(ns){ns.classList.add('show');setTimeout(()=>ns.classList.remove('show'),1800)}}
+
+// ═══════════════════════════════════════
+//  REFINE — "Girar parecido, mas…"
+//  Mapeia direção → tags Last.fm relacionadas
+// ═══════════════════════════════════════
+const REFINE_TAG_MAP = {
+  heavier: {
+    rock:['heavy metal','doom metal','sludge metal'],jazz:['free jazz','avant-garde jazz'],
+    pop:['alternative','grunge'],electronic:['industrial','noise'],soul:['funk','hard bop'],
+    indie:['post-hardcore','noise rock'],default:['heavy metal','hard rock','doom metal']
+  },
+  experimental: {
+    rock:['experimental rock','krautrock','post-rock'],jazz:['avant-garde jazz','free jazz'],
+    pop:['art pop','experimental pop'],electronic:['glitch','noise','idm'],
+    indie:['experimental indie','lo-fi'],default:['experimental','avant-garde','noise']
+  },
+  calmer: {
+    rock:['acoustic','folk rock','soft rock'],jazz:['smooth jazz','cool jazz','bossa nova'],
+    pop:['dream pop','soft pop'],electronic:['ambient','chillout','lo-fi'],
+    metal:['doom','post-metal'],default:['ambient','acoustic','folk']
+  },
+  darker: {
+    rock:['gothic rock','dark wave','post-punk'],jazz:['noir jazz','modal jazz'],
+    pop:['dark pop','electropop'],electronic:['dark ambient','industrial'],
+    indie:['shoegaze','slowcore'],default:['dark wave','gothic','post-punk']
+  },
+  popular: {
+    default:['pop','top 40','chart','hits']
+  },
+  obscure: {
+    rock:['obscure rock','private press','acid rock'],jazz:['obscure jazz','rare groove'],
+    pop:['obscure pop','cult'],electronic:['obscure electronic','experimental'],
+    default:['obscure','rare','cult','private press','underground']
+  }
+};
+
+function getRefineTag(direction){
+  const curGenre = selGenre.q || '';
+  const map = REFINE_TAG_MAP[direction];
+  if(!map) return 'rock';
+  // Try to match current genre to a category
+  for(const [key, tags] of Object.entries(map)){
+    if(key!=='default' && curGenre.includes(key)){return rnd(tags)}
+  }
+  return rnd(map.default || REFINE_TAG_MAP[direction].default || ['rock']);
+}
+
+async function spinRefined(direction){
+  // Visually mark active refine btn
+  document.querySelectorAll('.refine-btn').forEach(b=>b.classList.remove('spinning'));
+  const btn=document.querySelector(`.refine-btn[data-dir="${direction}"]`);
+  if(btn) btn.classList.add('spinning');
+
+  document.getElementById('spin-btn').disabled=true;
+  showLoad(true);hideRes();
+  document.getElementById('refine-section').style.display='none';
+
+  // Override the tag temporarily
+  const originalGenre = selGenre;
+  const refinedTag = getRefineTag(direction);
+  selGenre = {l: refinedTag, q: refinedTag};
+
+  try {
+    const album = await fetchAlbumMultiSource();
+    selGenre = originalGenre; // restore
+    if(!album){showErr('Nenhum álbum encontrado. Tente outra direção.');return}
+    curAlbum=album;spins++;
+    document.getElementById('stat-spins').textContent=spins;
+    DBService.addAlbum(album);
+    renderCard(album);
+    document.getElementById('result-section').style.display='block';
+    document.getElementById('result-section').scrollIntoView({behavior:'smooth',block:'start'});
+  } catch(e){
+    selGenre = originalGenre;
+    console.error(e);
+    showErr('Erro ao buscar álbum.<br><small>'+e.message+'</small>');
+  } finally {
+    showLoad(false);
+    document.getElementById('spin-btn').disabled=false;
+    document.querySelectorAll('.refine-btn').forEach(b=>b.classList.remove('spinning'));
+  }
+}
+
+// ═══════════════════════════════════════
+//  ADVENTURE MODE
+// ═══════════════════════════════════════
+const ADVENTURE_CONFIGS = {
+  challenge: {
+    tags:['noise','free jazz','brutal death metal','musique concrete','harsh noise','microtonality','12-tone'],
+    pageRange:[1,3]
+  },
+  different: {
+    tags:['afrobeat','gamelan','gagaku','tuvan throat singing','flamenco','qawwali','fado','cumbia','rebetiko'],
+    pageRange:[1,2]
+  },
+  cult: {
+    tags:['cult classic','obscure rock','private press','psychedelic','krautrock','tropicália','library music'],
+    pageRange:[1,4]
+  },
+  classic: {
+    tags:['classic rock','jazz standards','soul','blues classic','70s rock','60s pop','progressive rock'],
+    pageRange:[1,2],popularFilter:true
+  },
+  underground: {
+    tags:['underground hip hop','underground metal','lo-fi indie','bedroom pop','cassette culture','noise rock'],
+    pageRange:[2,5]
+  },
+  random: {
+    // pulls from all genres randomly
+    useAllGenres: true,
+    pageRange:[1,5]
+  }
+};
+
+function openAdventure(){document.getElementById('adventure-modal').classList.add('open')}
+function closeAdventure(){document.getElementById('adventure-modal').classList.remove('open')}
+
+async function startAdventure(mode){
+  closeAdventure();
+  const cfg = ADVENTURE_CONFIGS[mode];
+  if(!cfg) return;
+
+  document.getElementById('spin-btn').disabled=true;
+  showLoad(true);hideRes();
+  document.getElementById('refine-section').style.display='none';
+
+  const originalGenre = selGenre;
+  let tag;
+  if(cfg.useAllGenres){
+    tag = rnd(GENRES.filter(g=>g.q).map(g=>g.q));
+  } else {
+    tag = rnd(cfg.tags);
+  }
+  const page = Math.floor(Math.random()*(cfg.pageRange[1]-cfg.pageRange[0]+1))+cfg.pageRange[0];
+  selGenre = {l: tag, q: tag};
+
+  try {
+    let album = null;
+    // Try up to 3 times for underground/cult to get something rare
+    for(let attempt=0; attempt<3; attempt++){
+      const candidates = await LastFmService.getTopAlbumsByTag(tag, page+attempt);
+      if(!candidates.length) continue;
+      const shuffled = shuffle([...candidates]);
+
+      // For underground: filter by low playcount
+      let filtered = shuffled;
+      if(mode==='underground') filtered = shuffled.filter(a=>parseInt(a.playcount||0)<50000) || shuffled;
+      if(mode==='classic') filtered = shuffled.filter(a=>parseInt(a.playcount||0)>500000) || shuffled;
+
+      if(filtered.length){
+        // Use a temp override to pick from filtered list
+        const tempAlbum = filtered[0];
+        const mbData = await MusicBrainzService.searchRelease(tempAlbum.name, tempAlbum.artist?.name||'');
+        const spData = await SpotifyService.resolveAlbum(tempAlbum.name, tempAlbum.artist?.name||'');
+        let tracks = [];
+        if(spData?.spotifyId) tracks = await SpotifyService.getTracklist(spData.spotifyId);
+        if(!tracks.length && mbData?.mbid) tracks = await MusicBrainzService.getTracklist(mbData.mbid);
+        const totalMin = tracks.length ? Math.round(tracks.reduce((s,t)=>s+(t.ms||0),0)/60000) : 0;
+        const year = mbData?.date ? mbData.date.substring(0,4) : '?';
+        const image = spData?.image || LastFmService.getBestImage(tempAlbum.image) || '';
+        const id = spData?.spotifyId || mbData?.mbid || lfmId(tempAlbum);
+        album = {
+          id, name:tempAlbum.name, artist:tempAlbum.artist?.name||'',
+          year, type:'album', tracks:tracks.length?tracks:[{n:1,name:'Tracklist indisponível',ms:0}],
+          totalTracks:tracks.length, durationMin:totalMin, image,
+          genres:(tempAlbum.tags?.tag||[]).map(t=>t.name).slice(0,3),
+          popularity:parseInt(tempAlbum.playcount||0),
+          url:spData?.url||tempAlbum.url||'', lastfmUrl:tempAlbum.url||'',
+          label:mbData?.label||'', country:mbData?.country||'', mbid:mbData?.mbid||'',
+          _sources:{lastfm:true,mb:!!mbData,spotify:!!(spData?.image||spData?.url)}
+        };
+        break;
+      }
+    }
+
+    selGenre = originalGenre;
+    if(!album){showErr('Aventura não encontrou álbum. Tente novamente!');return}
+    curAlbum=album;spins++;
+    document.getElementById('stat-spins').textContent=spins;
+    DBService.addAlbum(album);
+    renderCard(album, mode);
+    document.getElementById('result-section').style.display='block';
+    document.getElementById('result-section').scrollIntoView({behavior:'smooth',block:'start'});
+  } catch(e){
+    selGenre = originalGenre;
+    console.error(e);
+    showErr('Erro no modo aventura.<br><small>'+e.message+'</small>');
+  } finally {
+    showLoad(false);
+    document.getElementById('spin-btn').disabled=false;
+  }
+}
+
+// ═══════════════════════════════════════
+//  HISTORY TAB STATE
+// ═══════════════════════════════════════
+let histTab = 'all';
+function setHistTab(tab, el){
+  histTab = tab;
+  document.querySelectorAll('.htab').forEach(b=>b.classList.remove('active'));
+  if(el) el.classList.add('active');
+  renderHist();
+}
+
+// ═══════════════════════════════════════
+//  HISTORY PANEL
+// ═══════════════════════════════════════
+let histOpen=false;
+function toggleHistory(){
+  histOpen=!histOpen;
+  document.getElementById('history-section').classList.toggle('open',histOpen);
+  document.getElementById('div1').style.display=histOpen?'':'none';
+  document.getElementById('hist-btn').classList.toggle('active',histOpen);
+  if(histOpen)renderHist();
+}
+function renderHist(){
+  const g=document.getElementById('hist-grid');
+  let h=DBService.getHistory();
+  if(!h.length){g.innerHTML='<div class="empty-state">Nenhum álbum no histórico ainda.</div>';document.getElementById('hist-count').textContent='';return}
+
+  // Filter by tab
+  if(histTab==='listened') h=h.filter(a=>a.listened);
+  if(histTab==='favorites') h=h.filter(a=>a.favorite);
+  if(histTab==='rated') h=h.filter(a=>a.rating>0);
+
+  // Sort
+  const sortEl = document.querySelector('.history-sort');
+  const sort = sortEl ? sortEl.value : 'recent';
+  if(sort==='rating') h=[...h].sort((a,b)=>(b.rating||0)-(a.rating||0));
+  if(sort==='alpha') h=[...h].sort((a,b)=>a.name.localeCompare(b.name));
+
+  document.getElementById('hist-count').textContent=h.length+' álbuns';
+
+  if(!h.length){g.innerHTML='<div class="empty-state">Nenhum álbum nessa categoria.</div>';return}
+
+  g.innerHTML=h.map(a=>`
+<div class="history-item" onclick="loadAlbumFromHistory('${a.id}')">
+  <img src="${x(a.image||'')}" alt="${x(a.name)}" loading="lazy"
+    onerror="this.style.display='none'">
+  ${a.listened?'<span class="listened-badge">✓</span>':''}
+  ${a.favorite?'<span class="fav-badge">★</span>':''}
+  <div class="history-meta">
+    <div class="history-title">${x(a.name)}</div>
+    <div class="history-artist">${x(a.artist)}</div>
+    <div class="history-stars-row">${hStars(a.rating)}</div>
+    ${a.note?`<div class="history-note-text">${x(a.note.substring(0,40))}${a.note.length>40?'…':''}</div>`:''}
+  </div>
+</div>`).join('');
+}
+function hStars(r){let h='';for(let i=1;i<=5;i++){h+=r>=i?'<span class="h-star">★</span>':r>=i-.5?'<span class="h-star">⯨</span>':'<span class="h-star empty">★</span>'}return h}
+function loadAlbumFromHistory(id){
+  const h=DBService.getHistory();const a=h.find(x=>x.id===id);
+  if(!a)return;curAlbum=a;renderCard(a);
+  document.getElementById('result-section').style.display='block';
+  document.getElementById('result-section').scrollIntoView({behavior:'smooth'});
+}
+
+// ═══════════════════════════════════════
+//  PILL STATUS
+// ═══════════════════════════════════════
+function setPill(service, active){
+  const el = document.getElementById('pill-'+service);
+  if(!el)return;
+  el.classList.toggle('active', active);
+}
+
+// ═══════════════════════════════════════
+//  AUTH UI
+// ═══════════════════════════════════════
+function syncAuthUI(){
+  const banner=document.getElementById('auth-banner');
+  const txt=document.getElementById('auth-text');
+  const btn=document.getElementById('auth-action-btn');
+  if(loggedIn()){
+    banner.classList.add('connected');
+    txt.innerHTML='✓ &nbsp;Conectado ao Spotify — capas em alta resolução ativadas';
+    btn.textContent='Desconectar';btn.className='auth-btn logout';
+    setPill('spotify',true);
+  }else{
+    banner.classList.remove('connected');
+    txt.innerHTML='<strong>Conecte sua conta Spotify</strong> — gratuita ou Premium — para capas em alta resolução e links de escuta.';
+    btn.textContent='Entrar com Spotify';btn.className='auth-btn login';
+    setPill('spotify',false);
+  }
+}
+
+// ═══════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════
+function showLoad(on){
+  document.getElementById('load-wrap').style.display=on?'block':'none';
+  document.getElementById('loading-steps').classList.toggle('on',on);
+  if(on){['ls1','ls2','ls3'].forEach(id=>{const e=document.getElementById(id);if(e){e.classList.remove('active','done')}})}
+}
+function hideRes(){document.getElementById('result-section').style.display='none'}
+function showErr(m){document.getElementById('result-section').style.display='block';document.getElementById('card-wrap').innerHTML=`<div class="notice"><strong>Ops!</strong><br>${m}</div>`}
+function fmt(ms){if(!ms)return'—';const m=Math.floor(ms/60000),s=Math.floor((ms%60000)/1000);return`${m}:${s.toString().padStart(2,'0')}`}
+function fmtNum(n){if(!n)return'';if(n>1000000)return(n/1000000).toFixed(1)+'M';if(n>1000)return(n/1000).toFixed(0)+'K';return n}
+function x(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function syncStats(){
+  const h=DBService.getHistory();
+  const n=h.filter(a=>a.listened).length;
+  document.getElementById('stat-listened').textContent=n;
+  document.getElementById('listened-badge').textContent=n+' escutados';
+}
+function clearHist(){DBService.clear()}
+
+// ═══════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════
+(async function boot(){
+  buildGenres();buildCountries();syncStats();syncWishlistCount();
+  prevEarnedBadges = checkBadges(false);
+  setPill('db',true); // DB local sempre ativo
+  document.getElementById('spin-btn').disabled=false; // funciona sem Spotify
+
+  const p=new URLSearchParams(location.search);
+  const code=p.get('code'),err=p.get('error');
+  if(code||err) history.replaceState({},'',location.pathname);
+
+  if(err){
+    showErr('Login cancelado ou negado pelo Spotify.');
+    document.getElementById('result-section').style.display='block';
+  } else if(code){
+    try {
+      ['sp_at','sp_exp','sp_rt'].forEach(k=>localStorage.removeItem(k));
+      await exchangeCode(code);
+      await new Promise(r=>setTimeout(r,300));
+    } catch(e){
+      console.error('Auth error:',e);
+      showErr('Erro no login com Spotify.<br><small>'+e.message+'</small>');
+      document.getElementById('result-section').style.display='block';
+    }
+  }
+  syncAuthUI();
+})();
+</script>
+</body>
+</html>
