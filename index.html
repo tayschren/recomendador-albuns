@@ -324,12 +324,25 @@ function handleAuth(){loggedIn()?doLogout():startLogin()}
 // ═══════════════════════════════════════
 //  SPOTIFY FETCH
 // ═══════════════════════════════════════
-async function spFetch(path){
+async function spFetch(path, _retry=false){
   const token=await getAT();
   console.log('[spFetch]', 'https://api.spotify.com/v1'+path);
   const r=await fetch('https://api.spotify.com/v1'+path,{headers:{Authorization:'Bearer '+token}});
-  if(r.status===401){await refreshToken();return spFetch(path)}
-  if(!r.ok){const t=await r.text();console.error('[spFetch] ERROR',r.status,t,'URL:','https://api.spotify.com/v1'+path);throw new Error('Spotify '+r.status+': '+t)}
+  if(r.status===401){
+    if(_retry) throw new Error('Token inválido após refresh. Faça login novamente.');
+    await refreshToken(); return spFetch(path, true);
+  }
+  if(!r.ok){
+    const t=await r.text();
+    console.error('[spFetch] ERROR',r.status,t,'URL:','https://api.spotify.com/v1'+path);
+    // Spotify às vezes retorna 400 "Invalid limit" quando o token está inválido
+    // Tenta refresh uma vez antes de desistir
+    if(r.status===400 && !_retry){
+      console.warn('[spFetch] 400 recebido, tentando refresh do token...');
+      try{ await refreshToken(); return spFetch(path, true); }catch(_){}
+    }
+    throw new Error('Spotify '+r.status+': '+t);
+  }
   return r.json();
 }
  
@@ -607,12 +620,17 @@ function x(s){if(!s)return'';return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')
   buildGenres();syncStats();
   const p=new URLSearchParams(location.search);
   const code=p.get('code'),err=p.get('error');
+  // Limpa a URL imediatamente para evitar que o ?code= interfira
+  if(code||err) history.replaceState({},'',location.pathname);
   if(err){
-    history.replaceState({},'',location.pathname);
     showErr('Login cancelado ou negado pelo Spotify.');
     document.getElementById('result-section').style.display='block';
   }else if(code){
-    try{await exchangeCode(code)}
+    try{
+      // Limpa tokens antigos antes de trocar o novo código
+      ['sp_at','sp_exp','sp_rt'].forEach(k=>localStorage.removeItem(k));
+      await exchangeCode(code);
+    }
     catch(e){
       console.error('Auth error:',e);
       showErr('Erro no login com Spotify.<br><small>'+e.message+'</small>');
