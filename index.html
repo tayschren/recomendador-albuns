@@ -417,10 +417,12 @@ async function fetchAlbum(){
   const histIds=h.map(a=>a.id);
   let q=selGenre.q||rnd(FALLBACK);
   if(F.eraFrom>1900||F.eraTo<2099)q+=` year:${F.eraFrom}-${F.eraTo}`;
-  const tp=F.type?`&type=${F.type}`:'&type=album,single';
-  const off=Math.floor(Math.random()*40);
-  const d=await spFetch(`/search?q=${encodeURIComponent(q)}${tp}&limit=50&offset=${off}`);
+  // Spotify search: limit máx 50, offset+limit ≤ 1000
+  const off=Math.floor(Math.random()*19)*50; // 0,50,100,...,900 — sempre seguro
+  const d=await spFetch(`/search?q=${encodeURIComponent(q)}&type=album&limit=50&offset=${off}`);
   let items=(d.albums||{}).items?.filter(Boolean)||[];
+  // filtra por album_type se o usuário escolheu um formato específico
+  if(F.type)items=items.filter(it=>(it.album_type||'').toLowerCase()===F.type);
   items=items.filter(it=>{const y=parseInt((it.release_date||'0').substring(0,4));return y>=F.eraFrom&&y<=F.eraTo});
   if(F.excl)items=items.filter(it=>!listenedIds.includes(it.id));
   if(!items.length)return null;
